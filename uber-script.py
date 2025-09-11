@@ -21,6 +21,7 @@ import requests
 import json
 import re
 import os
+import shutil
 import pdfkit
 from datetime import datetime
 from PyPDF2 import PdfMerger
@@ -330,8 +331,31 @@ merge_receipts(trips)
 home_address = "223 متفرع من شارع 90 – خلف فندق الدوسيت – التجمع الخامس – القاهرة الجديدة، N Teseen, New Cairo 1, Cairo Governorate 11835, Egypt"
 work_address = "1 Al Tabeer, El-Zaytoun Sharkeya, Zeitoun, Cairo Governorate 4520120, Egypt"
 
-# Load the Excel template
-excel_file = "Private Taxi Claim Form (Ver 2; 31Jul25).xlsx"
+def create_monthly_excel_copy(template_file, month_year=None):
+    """
+    Create a copy of the Excel template with month-year prefix.
+    If month_year is None, it will use the current month-year.
+    """
+    if month_year is None:
+        month_year = datetime.now().strftime("%Y-%m")
+    
+    # Extract file name and extension
+    file_name, file_ext = os.path.splitext(template_file)
+    
+    # Create new filename with month prefix
+    new_filename = f"{month_year}_{file_name}{file_ext}"
+    
+    # Copy the template to new file
+    shutil.copy2(template_file, new_filename)
+    print(f"✅ Created monthly copy: {new_filename}")
+    
+    return new_filename
+
+# Load the Excel template (original file name)
+template_excel_file = "Private_Taxi_Claim_Form.xlsx"
+
+# Create a monthly copy of the Excel file
+excel_file = create_monthly_excel_copy(template_excel_file)
 
 # Read the Excel file
 try:
@@ -370,10 +394,7 @@ try:
         df_claim.iloc[start_row + i, 6] = "محفظة التطبيق"  # Payment method (Column G)
         df_claim.iloc[start_row + i, 7] = ""  # Notes (Column H)
     
-    # Same Excel file in your script directory
-    excel_file = "Private Taxi Claim Form (Ver 2; 31Jul25).xlsx"
-
-    # Open the workbook
+    # Open the workbook (use the monthly copy we created)
     wb = load_workbook(excel_file)
     ws = wb["Claim Form"]
 
@@ -403,9 +424,10 @@ try:
         # Format the date column as dd/mm/yyyy
         ws.cell(row=row, column=2).number_format = "dd/mm/yyyy"
 
-    # Save changes back to the same file
+    # Save changes to the monthly copy
     wb.save(excel_file)
-    print(f"✅ Data written directly into {excel_file}")
+    print(f"✅ Data written to monthly copy: {excel_file}")
+    print(f"📄 Original template preserved: {template_excel_file}")
     
 except Exception as e:
     print(f"❌ Error filling Excel form: {e}")

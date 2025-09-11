@@ -7,6 +7,9 @@ all_receipts.pdf
 receipts/
 *.pdf
 
+# Ignore monthly Excel files (keep template only)
+????-??_Private_Taxi_Claim_Form.xlsx
+
 # Python
 __pycache__/
 *.py[cod]

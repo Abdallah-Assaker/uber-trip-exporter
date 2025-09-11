@@ -76,16 +76,18 @@ python uber-script.py
 ### What the script does:
 1. ✅ Fetches your Uber trips from the past month
 2. ✅ Downloads receipt PDFs for each trip
-3. ✅ Merges all receipts into `all_receipts.pdf`
-4. ✅ Fills out the Excel claim form automatically
-5. ✅ Saves trip data to `trips.json` for backup
+3. ✅ Creates a monthly copy of your Excel template (preserves original)
+4. ✅ Fills out the monthly Excel claim form automatically
+5. ✅ Merges all receipts into `all_receipts.pdf`
+6. ✅ Saves trip data to `trips.json` for backup
 
 ## 📁 Output Files
 
+- `YYYY-MM_Private_Taxi_Claim_Form.xlsx` - Monthly claim form with your trip data
 - `trips.json` - Raw trip data in JSON format
 - `all_receipts.pdf` - Merged PDF of all trip receipts
 - `receipts/` - Individual receipt PDFs
-- Updated Excel claim form with trip details
+- **Original Excel template remains untouched**
 
 ## 🔄 Monthly Workflow
 
