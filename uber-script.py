@@ -8,8 +8,15 @@ IMPORTANT: Before running this script:
 2. Get the cookie from your browser's Developer Tools (F12) -> Network tab -> Cookie header
 3. Do NOT put quotes around the cookie in the token.txt file
 
+Usage:
+    python uber-script.py [month]
+    
+    month: Optional integer (1-12) for the month to fetch data for.
+           If not provided, uses the previous month.
+           For December (12), uses the previous year.
+
 The script will:
-- Fetch trip data from Uber's GraphQL API
+- Fetch trip data from Uber's GraphQL API for the specified month
 - Download receipt PDFs
 - Fill out the Excel claim form
 - Merge all receipts into one PDF
@@ -22,8 +29,10 @@ import json
 import re
 import os
 import shutil
+import sys
 import pdfkit
-from datetime import datetime
+from datetime import datetime, timedelta
+from calendar import monthrange
 from PyPDF2 import PdfMerger
 import pandas as pd
 from datetime import datetime
@@ -32,6 +41,79 @@ from openpyxl.styles import NamedStyle
 
 path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
 config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
+
+def get_month_date_range(month=None):
+    """
+    Calculate start and end timestamps for a given month.
+    
+    Args:
+        month (int): Month number (1-12). If None, uses previous month.
+                    For December (12), uses previous year.
+    
+    Returns:
+        tuple: (start_timestamp_ms, end_timestamp_ms, month_year_string)
+    """
+    current_date = datetime.now()
+    
+    if month is None:
+        # Default to previous month
+        if current_date.month == 1:
+            target_month = 12
+            target_year = current_date.year - 1
+        else:
+            target_month = current_date.month - 1
+            target_year = current_date.year
+    else:
+        # Use provided month
+        if not 1 <= month <= 12:
+            raise ValueError("Month must be between 1 and 12")
+        
+        target_month = month
+        if month == 12:
+            target_year = current_date.year - 1
+        else:
+            target_year = current_date.year
+    
+    # Calculate start of month (00:00:00)
+    start_date = datetime(target_year, target_month, 1)
+    
+    # Calculate end of month (23:59:59.999)
+    _, last_day = monthrange(target_year, target_month)
+    end_date = datetime(target_year, target_month, last_day, 23, 59, 59, 999000)
+    
+    # Convert to milliseconds (Uber API expects milliseconds)
+    start_timestamp_ms = int(start_date.timestamp() * 1000)
+    end_timestamp_ms = int(end_date.timestamp() * 1000)
+    
+    # Create month-year string for file naming
+    month_year_string = start_date.strftime("%Y-%m")
+    
+    print(f"📅 Fetching data for: {start_date.strftime('%B %Y')}")
+    print(f"📅 Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    
+    return start_timestamp_ms, end_timestamp_ms, month_year_string
+
+def parse_command_line_args():
+    """Parse command line arguments for month parameter."""
+    if len(sys.argv) > 1:
+        try:
+            month = int(sys.argv[1])
+            if not 1 <= month <= 12:
+                print("❌ Error: Month must be between 1 and 12")
+                sys.exit(1)
+            return month
+        except ValueError:
+            print("❌ Error: Month must be a valid integer between 1 and 12")
+            print("Usage: python uber-script.py [month]")
+            print("Example: python uber-script.py 7  (for July)")
+            sys.exit(1)
+    return None
+
+# Parse command line arguments
+target_month = parse_command_line_args()
+
+# Get date range for the target month
+start_time_ms, end_time_ms, month_year = get_month_date_range(target_month)
 
 def read_token_from_file(file_path="token.txt"):
     """
@@ -75,14 +157,14 @@ headers = {
 activities_query = """
 query Activities(
   $cityID: Int
-  $endTimeMs: Float = 1756673999999
+  $endTimeMs: Float
   $includePast: Boolean = true
   $includeUpcoming: Boolean = true
   $limit: Int = 60
   $nextPageToken: String
   $orderTypes: [RVWebCommonActivityOrderType!] = [RIDES, TRAVEL]
   $profileType: RVWebCommonActivityProfileType = PERSONAL
-  $startTimeMs: Float = 1753995600000
+  $startTimeMs: Float
 ) {
   activities(cityID: $cityID) {
     past(
@@ -225,8 +307,8 @@ variables = {
     "limit": 60,
     "orderTypes": ["RIDES", "TRAVEL"],
     "profileType": "PERSONAL",
-    "endTimeMs": 1756673999999,
-    "startTimeMs": 1753995600000,
+    "endTimeMs": end_time_ms,
+    "startTimeMs": start_time_ms,
 }
 
 payload = {
@@ -313,19 +395,30 @@ if response.status_code == 200:
             "dropoff_location": dropoff_address,
         })
 
-        output = {
-        "overall_amount": round(overall_amount, 2),
-        "trips": trips
-          }
+    # Create month-specific output file names
+    monthly_receipts_file = f"{month_year}_all_receipts.pdf"
+    monthly_trips_file = f"{month_year}_trips.json"
 
-        with open("trips.json", "w", encoding="utf-8") as f:
-            json.dump(output, f, ensure_ascii=False, indent=2)
+    # Save trips data with month prefix
+    with open(monthly_trips_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "overall_amount": round(overall_amount, 2),
+            "trips": trips,
+            "month_year": month_year,
+            "date_range": {
+                "start": start_time_ms,
+                "end": end_time_ms
+            }
+        }, f, ensure_ascii=False, indent=2)
 
-        print(f"✅ Saved {len(trips)} trips to trips.json (total: {output['overall_amount']})")
+    print(f"✅ Saved {len(trips)} trips to {monthly_trips_file} (total: {round(overall_amount, 2)})")
+    
+    # Merge receipts with month-specific filename
+    merge_receipts(trips, output_file=monthly_receipts_file)
+
 else:
-  print("Error:", response.status_code, response.text)
-
-merge_receipts(trips)
+    print("Error:", response.status_code, response.text)
+    sys.exit(1)
 
 # Define the addresses for determining the trip reason
 home_address = "223 متفرع من شارع 90 – خلف فندق الدوسيت – التجمع الخامس – القاهرة الجديدة، N Teseen, New Cairo 1, Cairo Governorate 11835, Egypt"
@@ -354,8 +447,8 @@ def create_monthly_excel_copy(template_file, month_year=None):
 # Load the Excel template (original file name)
 template_excel_file = "Private_Taxi_Claim_Form.xlsx"
 
-# Create a monthly copy of the Excel file
-excel_file = create_monthly_excel_copy(template_excel_file)
+# Create a monthly copy of the Excel file using the calculated month_year
+excel_file = create_monthly_excel_copy(template_excel_file, month_year)
 
 # Read the Excel file
 try:

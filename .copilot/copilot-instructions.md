@@ -3,3 +3,6 @@ This is a python script that was created to automate a process that is required 
 The script will extract the required information from graphQL apis and fill the excel sheet with the required information.
 
 It will also download the receipts for each trip during the month and merge them into a single pdf file for ease of printing.
+
+## Instructions for code generation
+- Always add proper console logs to track progress and errors

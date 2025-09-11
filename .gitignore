@@ -2,8 +2,8 @@
 token.txt
 
 # Ignore generated files
-trips.json
-all_receipts.pdf
+????-??_trips.json
+????-??_all_receipts.pdf
 receipts/
 *.pdf
 

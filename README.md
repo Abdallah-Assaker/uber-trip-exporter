@@ -68,31 +68,51 @@ work_address = "Your work address"
 
 ## 🚀 Usage
 
-### Monthly Run
+### Basic Usage (Previous Month)
 ```bash
 python uber-script.py
 ```
 
+### Specific Month Usage
+```bash
+python uber-script.py [month]
+```
+
+**Examples:**
+```bash
+python uber-script.py 7     # Fetch July data
+python uber-script.py 12    # Fetch December data (previous year)
+python uber-script.py 1     # Fetch January data (current year)
+```
+
+**Month Logic:**
+- **No parameter**: Fetches previous month's data
+- **Month 1-11**: Uses current year
+- **Month 12 (December)**: Uses previous year (for year-end reporting)
+
 ### What the script does:
-1. ✅ Fetches your Uber trips from the past month
-2. ✅ Downloads receipt PDFs for each trip
-3. ✅ Creates a monthly copy of your Excel template (preserves original)
-4. ✅ Fills out the monthly Excel claim form automatically
+1. ✅ Calculates date range for the specified month/year
+2. ✅ Fetches your Uber trips for that period
+3. ✅ Downloads receipt PDFs for each trip
+4. ✅ Creates a monthly copy of your Excel template (preserves original)
+5. ✅ Fills out the monthly Excel claim form automatically
+6. ✅ Merges all receipts into a month-specific PDF
+7. ✅ Saves trip data to month-specific JSON for backup
 5. ✅ Merges all receipts into `all_receipts.pdf`
 6. ✅ Saves trip data to `trips.json` for backup
 
 ## 📁 Output Files
 
 - `YYYY-MM_Private_Taxi_Claim_Form.xlsx` - Monthly claim form with your trip data
-- `trips.json` - Raw trip data in JSON format
-- `all_receipts.pdf` - Merged PDF of all trip receipts
+- `YYYY-MM_trips.json` - Raw trip data in JSON format with date range info
+- `YYYY-MM_all_receipts.pdf` - Merged PDF of all trip receipts
 - `receipts/` - Individual receipt PDFs
 - **Original Excel template remains untouched**
 
 ## 🔄 Monthly Workflow
 
 1. **Update Token**: Get fresh cookie from browser → Update `token.txt`
-2. **Run Script**: `python uber-script.py`
+2. **Run Script**: `python uber-script.py [month]` (e.g., `python uber-script.py 7` for July)
 3. **Submit Forms**: Use generated Excel file and merged PDF for reimbursement
 
 ## 🤝 Sharing with Colleagues
@@ -118,6 +138,16 @@ To share this script:
 - Get a fresh cookie from your browser
 - Update `token.txt` with the new cookie
 - Ensure no extra quotes or spaces in the token file
+
+### Invalid Month Parameter
+- Month must be an integer between 1 and 12
+- Use `python uber-script.py 7` not `python uber-script.py July`
+- Check command syntax: `python uber-script.py [month]`
+
+### No Data Found
+- Verify you had Uber trips in the specified month/year
+- Check if the month logic is correct (December uses previous year)
+- Ensure your date range covers the intended period
 
 ### Missing Receipts
 - Check internet connection
