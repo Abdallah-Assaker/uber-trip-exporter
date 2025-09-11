@@ -240,6 +240,111 @@ def download_receipt_pdf(uuid, timestamp, folder="receipts"):
     else:
         print(f"❌ Failed: {resp.status_code}, {resp.text[:200]}")
         return None
+
+def cleanup_temp_receipts_folder(folder="receipts"):
+    """Remove the temporary receipts folder after processing."""
+    if os.path.exists(folder):
+        shutil.rmtree(folder)
+        print(f"🗑️ Cleaned up temporary folder: {folder}")
+
+def create_monthly_excel_copy(template_file, month_year=None, output_folder=None):
+    """
+    Create a copy of the Excel template with month-year prefix in the specified output folder.
+    If month_year is None, it will use the current month-year.
+    If output_folder is None, it will create the file in the current directory.
+    """
+    if month_year is None:
+        month_year = datetime.now().strftime("%Y-%m")
+    
+    # Extract file name and extension
+    file_name, file_ext = os.path.splitext(template_file)
+    
+    # Create new filename with month prefix
+    new_filename = f"{month_year}_{file_name}{file_ext}"
+    
+    # If output folder is specified, create the path within that folder
+    if output_folder:
+        new_filepath = os.path.join(output_folder, new_filename)
+    else:
+        new_filepath = new_filename
+    
+    # Copy the template to new file
+    shutil.copy2(template_file, new_filepath)
+    print(f"✅ Created monthly copy: {new_filepath}")
+    
+    return new_filepath
+
+def process_excel_file(excel_file, trips, template_excel_file, home_address, work_address):
+    """Process the Excel file with trip data."""
+    # Read the Claim Form sheet
+    df_claim = pd.read_excel(excel_file, sheet_name="Claim Form", header=None)
+    
+    # Read the Legend sheet
+    df_legend = pd.read_excel(excel_file, sheet_name="Legend")
+    
+    # Fill in the trip data starting from row 8 (index 7 in 0-based)
+    start_row = 7
+    
+    for i, trip in enumerate(trips):
+        # Determine the reason for the trip based on pickup location
+        if trip["pickup_location"] == home_address:
+            trip_reason = "العودة من العمل"  # Return from work
+        elif trip["pickup_location"] == work_address:
+            trip_reason = "الذهاب إلى العمل"  # Going to work
+        else:
+            trip_reason = ""  # Unknown reason
+        
+        # Convert the date string to a proper date format
+        try:
+            trip_dt = datetime.strptime(trip["time"].replace("•", "").strip(), "%b %d %I:%M %p")
+            trip_dt = trip_dt.replace(year=datetime.now().year)  # اضف السنة
+            trip_date = trip_dt.date()
+        except:
+            trip_date = trip["time"]  # Fallback to string if parsing fails
+        
+        # Fill in the row data
+        df_claim.iloc[start_row + i, 1] = trip_date  # Date (Column B)
+        df_claim.iloc[start_row + i, 2] = trip["pickup_location"]  # Pickup location (Column C)
+        df_claim.iloc[start_row + i, 3] = trip["dropoff_location"]  # Dropoff location (Column D)
+        df_claim.iloc[start_row + i, 4] = trip["price"]  # Price (Column E)
+        df_claim.iloc[start_row + i, 5] = trip_reason  # Reason (Column F)
+        df_claim.iloc[start_row + i, 6] = "محفظة التطبيق"  # Payment method (Column G)
+        df_claim.iloc[start_row + i, 7] = ""  # Notes (Column H)
+    
+    # Open the workbook (use the monthly copy we created)
+    wb = load_workbook(excel_file)
+    ws = wb["Claim Form"]
+
+    start_row = 8  # Row 8 in Excel (since Excel rows are 1-based)
+
+    for i, trip in enumerate(trips, start=0):
+        # Try to parse the trip date
+        try:
+            trip_dt = datetime.strptime(
+                trip["time"].replace("•", "").strip(), "%b %d %I:%M %p"
+            )
+            trip_dt = trip_dt.replace(year=datetime.now().year)  # add year if missing
+            trip_date = trip_dt
+        except:
+            trip_date = trip["time"]  # fallback if parsing fails
+
+        row = start_row + i
+        ws.cell(row=row, column=2, value=trip_date)  # Column B = Date
+        ws.cell(row=row, column=3, value=trip["pickup_location"])
+        ws.cell(row=row, column=4, value=trip["dropoff_location"])
+        ws.cell(row=row, column=5, value=trip["price"])
+        ws.cell(row=row, column=6, value="To Work" if trip["pickup_location"] == home_address else
+                                      "From Work" if trip["pickup_location"] == work_address else "")
+        ws.cell(row=row, column=7, value="App Wallet")
+        ws.cell(row=row, column=8, value="")
+
+        # Format the date column as dd/mm/yyyy
+        ws.cell(row=row, column=2).number_format = "dd/mm/yyyy"
+
+    # Save changes to the monthly copy
+    wb.save(excel_file)
+    print(f"✅ Data written to monthly copy: {excel_file}")
+    print(f"📄 Original template preserved: {template_excel_file}")
   
 def get_receipt_timestamp(uuid):
     receipt_payload = {
@@ -395,9 +500,14 @@ if response.status_code == 200:
             "dropoff_location": dropoff_address,
         })
 
-    # Create month-specific output file names
-    monthly_receipts_file = f"{month_year}_all_receipts.pdf"
-    monthly_trips_file = f"{month_year}_trips.json"
+    # Create month-specific output folder
+    output_folder = month_year
+    os.makedirs(output_folder, exist_ok=True)
+    print(f"📁 Created output folder: {output_folder}")
+
+    # Create month-specific output file paths
+    monthly_receipts_file = os.path.join(output_folder, "all_receipts.pdf")
+    monthly_trips_file = os.path.join(output_folder, "trips.json")
 
     # Save trips data with month prefix
     with open(monthly_trips_file, "w", encoding="utf-8") as f:
@@ -415,112 +525,34 @@ if response.status_code == 200:
     
     # Merge receipts with month-specific filename
     merge_receipts(trips, output_file=monthly_receipts_file)
+    
+    # Clean up temporary receipts folder
+    cleanup_temp_receipts_folder()
+
+    # Now process the Excel file within the same output folder
+    # Define the addresses for determining the trip reason
+    home_address = "223 متفرع من شارع 90 – خلف فندق الدوسيت – التجمع الخامس – القاهرة الجديدة، N Teseen, New Cairo 1, Cairo Governorate 11835, Egypt"
+    work_address = "1 Al Tabeer, El-Zaytoun Sharkeya, Zeitoun, Cairo Governorate 4520120, Egypt"
+
+    # Load the Excel template (original file name)
+    template_excel_file = "Private_Taxi_Claim_Form.xlsx"
+
+    # Create a monthly copy of the Excel file using the calculated month_year
+    excel_file = create_monthly_excel_copy(template_excel_file, month_year, output_folder)
+
+    # Process Excel file
+    try:
+        process_excel_file(excel_file, trips, template_excel_file, home_address, work_address)
+        
+        print(f"\n🎉 Monthly report completed!")
+        print(f"📁 All files saved in folder: {output_folder}")
+        print(f"   - trips.json (trip data)")
+        print(f"   - all_receipts.pdf (merged receipts)")
+        print(f"   - {month_year}_Private_Taxi_Claim_Form.xlsx (claim form)")
+        
+    except Exception as e:
+        print(f"❌ Error processing Excel file: {e}")
 
 else:
     print("Error:", response.status_code, response.text)
     sys.exit(1)
-
-# Define the addresses for determining the trip reason
-home_address = "223 متفرع من شارع 90 – خلف فندق الدوسيت – التجمع الخامس – القاهرة الجديدة، N Teseen, New Cairo 1, Cairo Governorate 11835, Egypt"
-work_address = "1 Al Tabeer, El-Zaytoun Sharkeya, Zeitoun, Cairo Governorate 4520120, Egypt"
-
-def create_monthly_excel_copy(template_file, month_year=None):
-    """
-    Create a copy of the Excel template with month-year prefix.
-    If month_year is None, it will use the current month-year.
-    """
-    if month_year is None:
-        month_year = datetime.now().strftime("%Y-%m")
-    
-    # Extract file name and extension
-    file_name, file_ext = os.path.splitext(template_file)
-    
-    # Create new filename with month prefix
-    new_filename = f"{month_year}_{file_name}{file_ext}"
-    
-    # Copy the template to new file
-    shutil.copy2(template_file, new_filename)
-    print(f"✅ Created monthly copy: {new_filename}")
-    
-    return new_filename
-
-# Load the Excel template (original file name)
-template_excel_file = "Private_Taxi_Claim_Form.xlsx"
-
-# Create a monthly copy of the Excel file using the calculated month_year
-excel_file = create_monthly_excel_copy(template_excel_file, month_year)
-
-# Read the Excel file
-try:
-    # Read the Claim Form sheet
-    df_claim = pd.read_excel(excel_file, sheet_name="Claim Form", header=None)
-    
-    # Read the Legend sheet
-    df_legend = pd.read_excel(excel_file, sheet_name="Legend")
-    
-    # Fill in the trip data starting from row 8 (index 7 in 0-based)
-    start_row = 7
-    
-    for i, trip in enumerate(trips):
-        # Determine the reason for the trip based on pickup location
-        if trip["pickup_location"] == home_address:
-            trip_reason = "العودة من العمل"  # Return from work
-        elif trip["pickup_location"] == work_address:
-            trip_reason = "الذهاب إلى العمل"  # Going to work
-        else:
-            trip_reason = ""  # Unknown reason
-        
-        # Convert the date string to a proper date format
-        try:
-            trip_dt = datetime.strptime(trip["time"].replace("•", "").strip(), "%b %d %I:%M %p")
-            trip_dt = trip_dt.replace(year=datetime.now().year)  # اضف السنة
-            trip_date = trip_dt.date()
-        except:
-            trip_date = trip["time"]  # Fallback to string if parsing fails
-        
-        # Fill in the row data
-        df_claim.iloc[start_row + i, 1] = trip_date  # Date (Column B)
-        df_claim.iloc[start_row + i, 2] = trip["pickup_location"]  # Pickup location (Column C)
-        df_claim.iloc[start_row + i, 3] = trip["dropoff_location"]  # Dropoff location (Column D)
-        df_claim.iloc[start_row + i, 4] = trip["price"]  # Price (Column E)
-        df_claim.iloc[start_row + i, 5] = trip_reason  # Reason (Column F)
-        df_claim.iloc[start_row + i, 6] = "محفظة التطبيق"  # Payment method (Column G)
-        df_claim.iloc[start_row + i, 7] = ""  # Notes (Column H)
-    
-    # Open the workbook (use the monthly copy we created)
-    wb = load_workbook(excel_file)
-    ws = wb["Claim Form"]
-
-    start_row = 8  # Row 8 in Excel (since Excel rows are 1-based)
-
-    for i, trip in enumerate(trips, start=0):
-        # Try to parse the trip date
-        try:
-            trip_dt = datetime.strptime(
-                trip["time"].replace("•", "").strip(), "%b %d %I:%M %p"
-            )
-            trip_dt = trip_dt.replace(year=datetime.now().year)  # add year if missing
-            trip_date = trip_dt
-        except:
-            trip_date = trip["time"]  # fallback if parsing fails
-
-        row = start_row + i
-        ws.cell(row=row, column=2, value=trip_date)  # Column B = Date
-        ws.cell(row=row, column=3, value=trip["pickup_location"])
-        ws.cell(row=row, column=4, value=trip["dropoff_location"])
-        ws.cell(row=row, column=5, value=trip["price"])
-        ws.cell(row=row, column=6, value="To Work" if trip["pickup_location"] == home_address else
-                                      "From Work" if trip["pickup_location"] == work_address else "")
-        ws.cell(row=row, column=7, value="App Wallet")
-        ws.cell(row=row, column=8, value="")
-
-        # Format the date column as dd/mm/yyyy
-        ws.cell(row=row, column=2).number_format = "dd/mm/yyyy"
-
-    # Save changes to the monthly copy
-    wb.save(excel_file)
-    print(f"✅ Data written to monthly copy: {excel_file}")
-    print(f"📄 Original template preserved: {template_excel_file}")
-    
-except Exception as e:
-    print(f"❌ Error filling Excel form: {e}")

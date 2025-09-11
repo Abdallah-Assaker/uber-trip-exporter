@@ -92,28 +92,41 @@ python uber-script.py 1     # Fetch January data (current year)
 
 ### What the script does:
 1. ✅ Calculates date range for the specified month/year
-2. ✅ Fetches your Uber trips for that period
-3. ✅ Downloads receipt PDFs for each trip
-4. ✅ Creates a monthly copy of your Excel template (preserves original)
-5. ✅ Fills out the monthly Excel claim form automatically
-6. ✅ Merges all receipts into a month-specific PDF
-7. ✅ Saves trip data to month-specific JSON for backup
-5. ✅ Merges all receipts into `all_receipts.pdf`
-6. ✅ Saves trip data to `trips.json` for backup
+2. ✅ Creates a month-specific output folder (YYYY-MM format)
+3. ✅ Fetches your Uber trips for that period
+4. ✅ Downloads receipt PDFs to temporary folder
+5. ✅ Creates monthly Excel claim form in the output folder
+6. ✅ Merges all receipts into `all_receipts.pdf` in the output folder
+7. ✅ Saves trip data to `trips.json` in the output folder
+8. ✅ Cleans up temporary receipt files
+9. ✅ Preserves original Excel template
 
-## 📁 Output Files
+## 📁 Output Structure
 
-- `YYYY-MM_Private_Taxi_Claim_Form.xlsx` - Monthly claim form with your trip data
-- `YYYY-MM_trips.json` - Raw trip data in JSON format with date range info
-- `YYYY-MM_all_receipts.pdf` - Merged PDF of all trip receipts
-- `receipts/` - Individual receipt PDFs
-- **Original Excel template remains untouched**
+After running the script, you'll have a folder structure like this:
+```
+project-folder/
+├── uber-script.py
+├── Private_Taxi_Claim_Form.xlsx (original template)
+├── token.txt
+└── 2025-09/                    # Month-specific folder
+    ├── trips.json              # Trip data in JSON format
+    ├── all_receipts.pdf         # Merged PDF receipts
+    └── 2025-09_Private_Taxi_Claim_Form.xlsx  # Filled claim form
+```
+
+**Benefits of Folder Organization:**
+- ✅ Separate outputs by month for easy archiving
+- ✅ Original template stays clean and reusable
+- ✅ No more cluttered main directory
+- ✅ Easy to find specific month's data
 
 ## 🔄 Monthly Workflow
 
 1. **Update Token**: Get fresh cookie from browser → Update `token.txt`
 2. **Run Script**: `python uber-script.py [month]` (e.g., `python uber-script.py 7` for July)
-3. **Submit Forms**: Use generated Excel file and merged PDF for reimbursement
+3. **Find Output**: Navigate to the `YYYY-MM/` folder created by the script
+4. **Submit Forms**: Use the Excel file and merged PDF from the month folder for reimbursement
 
 ## 🤝 Sharing with Colleagues
 
@@ -144,6 +157,11 @@ To share this script:
 - Use `python uber-script.py 7` not `python uber-script.py July`
 - Check command syntax: `python uber-script.py [month]`
 
+### Missing Output Files
+- Check the month-specific folder (e.g., `2025-09/`)
+- Files are organized in folders, not in the main directory
+- Look for the pattern `YYYY-MM/` where YYYY-MM matches your target month
+
 ### No Data Found
 - Verify you had Uber trips in the specified month/year
 - Check if the month logic is correct (December uses previous year)
@@ -153,10 +171,12 @@ To share this script:
 - Check internet connection
 - Verify trips exist in your Uber account
 - Some older trips may not have downloadable receipts
+- Temporary receipts folder is automatically cleaned up after processing
 
 ### Excel Errors
 - Ensure the Excel template is in the same directory
 - Don't modify the structure of the Excel template
+- Original template should remain as `Private_Taxi_Claim_Form.xlsx`
 
 ## 📄 License
 

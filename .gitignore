@@ -1,14 +1,15 @@
 # Ignore sensitive token file
 token.txt
 
-# Ignore generated files
+# Ignore generated monthly folders and their contents
+????-??/
+
+# Ignore old format generated files (if any remain)
 ????-??_trips.json
 ????-??_all_receipts.pdf
+????-??_Private_Taxi_Claim_Form.xlsx
 receipts/
 *.pdf
-
-# Ignore monthly Excel files (keep template only)
-????-??_Private_Taxi_Claim_Form.xlsx
 
 # Python
 __pycache__/
