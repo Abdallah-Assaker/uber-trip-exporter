@@ -1,0 +1,30 @@
+{
+  "home_address_keywords": [
+    "223 متفرع من شارع 90",
+    "خلف فندق الدوسيت", 
+    "N Teseen, New Cairo 1",
+    "التسعين الشمالي"
+  ],
+  "work_address_keywords": [
+    "1 Al Tabeer",
+    "El-Zaytoun Sharkeya",
+    "Zeitoun, Cairo",
+    "الطابير"
+  ],
+  "_instructions": {
+    "description": "Update the keyword lists above with parts of your addresses that are consistent",
+    "tips": [
+      "Use street names, landmarks, or area names that appear in your addresses",
+      "Include both Arabic and English variations if applicable", 
+      "Add multiple keywords for each location to handle address variations",
+      "Test by running the script and checking the trips.json file for actual addresses"
+    ],
+    "setup_steps": [
+      "1. Copy this file to config.json",
+      "2. Update home_address_keywords with parts of your home address",
+      "3. Update work_address_keywords with parts of your work address",
+      "4. Run the script and check trips.json to see actual addresses used",
+      "5. Adjust keywords as needed for better matching"
+    ]
+  }
+}

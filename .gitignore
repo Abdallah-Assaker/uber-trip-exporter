@@ -1,5 +1,6 @@
-# Ignore sensitive token file
+# Ignore sensitive files
 token.txt
+config.json
 
 # Ignore generated monthly folders and their contents
 ????-??/

@@ -6,3 +6,4 @@ It will also download the receipts for each trip during the month and merge them
 
 ## Instructions for code generation
 - Always add proper console logs to track progress and errors
+- Always update the README.md and .gitignore files to reflect any changes

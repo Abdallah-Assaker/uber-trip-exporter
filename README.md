@@ -8,8 +8,10 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 ## 🚀 Features
 
 - **Automated Data Extraction**: Fetches trip data from Uber's GraphQL API
+- **Smart Address Matching**: Uses keywords to classify trips as "To Work" or "From Work"
 - **Receipt Management**: Downloads and merges all trip receipts into a single PDF
 - **Excel Integration**: Automatically fills out company expense claim forms
+- **Month-Specific Organization**: Creates organized folders for each month's data
 - **Secure Token Management**: Uses external token file for easy monthly updates
 - **Easy Sharing**: Share with colleagues without exposing your credentials
 
@@ -58,13 +60,60 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 marketing_vistor_id=abc123; udi-id=def456; isWebLogin=true; sid=xyz789; ...
 ```
 
-### 3. Update Addresses
+### 3. Configure Address Keywords
 
-Edit `uber-script.py` and update these variables:
-```python
-home_address = "Your home address"
-work_address = "Your work address"
+The script uses keyword-based matching to classify trips as "To Work" or "From Work" since Uber addresses may vary slightly due to location accuracy.
+
+**On first run**, the script will automatically create a `config.json` file with default template. Alternatively, you can copy from the example:
+
+```bash
+copy config.json.example config.json
 ```
+
+The config file format:
+
+```json
+{
+  "home_address_keywords": [
+    "YOUR_HOME_STREET_NAME",
+    "YOUR_HOME_LANDMARK", 
+    "YOUR_HOME_AREA"
+  ],
+  "work_address_keywords": [
+    "YOUR_WORK_STREET_NAME",
+    "YOUR_WORK_LANDMARK",
+    "YOUR_WORK_AREA"
+  ]
+}
+```
+
+**Update this file** with actual keywords from your addresses:
+
+```json
+{
+  "home_address_keywords": [
+    "223 متفرع من شارع 90",
+    "خلف فندق الدوسيت", 
+    "N Teseen, New Cairo 1",
+    "التسعين الشمالي"
+  ],
+  "work_address_keywords": [
+    "1 Al Tabeer",
+    "El-Zaytoun Sharkeya",
+    "Zeitoun, Cairo",
+    "الطابير"
+  ]
+}
+```
+
+**Tips for choosing keywords:**
+- ✅ Use consistent parts of addresses (street names, landmarks)
+- ✅ Include both Arabic and English variations
+- ✅ Add area/district names that don't change
+- ✅ Include nearby landmarks mentioned in addresses
+- ❌ Avoid full addresses that may vary
+- ❌ Don't use building numbers that might change (e.g., 223 vs 224)
+- 🔍 Test by checking actual addresses in the generated `trips.json` file
 
 ## 🚀 Usage
 
@@ -156,6 +205,19 @@ To share this script:
 - Month must be an integer between 1 and 12
 - Use `python uber-script.py 7` not `python uber-script.py July`
 - Check command syntax: `python uber-script.py [month]`
+
+### Trip Classification Issues (To Work / From Work)
+- Trips showing as blank reason or incorrect classification
+- **Solution**: Update address keywords in the script
+- Check `trips.json` for actual address strings used by Uber
+- Add more keyword variations to `home_address_keywords` and `work_address_keywords`
+- Use partial addresses that are consistent (street names, landmarks, areas)
+
+**Example address keyword debugging:**
+1. Run the script and check `YYYY-MM/trips.json`
+2. Look at `pickup_location` values for your actual trips
+3. Find consistent parts and add them to keyword lists
+4. Re-run the script to test classification
 
 ### Missing Output Files
 - Check the month-specific folder (e.g., `2025-09/`)

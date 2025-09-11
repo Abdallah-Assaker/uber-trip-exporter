@@ -7,6 +7,7 @@ IMPORTANT: Before running this script:
 1. Update the 'token.txt' file with your current Uber authentication cookie
 2. Get the cookie from your browser's Developer Tools (F12) -> Network tab -> Cookie header
 3. Do NOT put quotes around the cookie in the token.txt file
+4. Configure your address keywords in the 'config.json' file (will be created automatically on first run)
 
 Usage:
     python uber-script.py [month]
@@ -18,7 +19,7 @@ Usage:
 The script will:
 - Fetch trip data from Uber's GraphQL API for the specified month
 - Download receipt PDFs
-- Fill out the Excel claim form
+- Fill out the Excel claim form using keyword-based address matching
 - Merge all receipts into one PDF
 
 For detailed instructions, see README.md
@@ -137,6 +138,81 @@ def read_token_from_file(file_path="token.txt"):
         exit(1)
     except Exception as e:
         print(f"❌ Error reading token file: {e}")
+        exit(1)
+
+def read_config_from_file(file_path="config.json"):
+    """
+    Read address keywords configuration from a JSON file.
+    If the file doesn't exist, create it with default values.
+    """
+    try:
+        # Get the directory where the script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file_path = os.path.join(script_dir, file_path)
+        
+        with open(config_file_path, 'r', encoding='utf-8') as file:
+            config = json.load(file)
+            
+        # Validate required keys
+        if 'home_address_keywords' not in config or 'work_address_keywords' not in config:
+            raise ValueError("Config file must contain 'home_address_keywords' and 'work_address_keywords'")
+            
+        print(f"✅ Loaded configuration from {file_path}")
+        return config['home_address_keywords'], config['work_address_keywords']
+        
+    except FileNotFoundError:
+        print(f"⚠️ Config file {file_path} not found. Creating default config...")
+        
+        # Create default configuration
+        default_config = {
+            "home_address_keywords": [
+                "YOUR_HOME_STREET_NAME",
+                "YOUR_HOME_LANDMARK", 
+                "YOUR_HOME_AREA"
+            ],
+            "work_address_keywords": [
+                "YOUR_WORK_STREET_NAME",
+                "YOUR_WORK_LANDMARK",
+                "YOUR_WORK_AREA"
+            ],
+            "_instructions": {
+                "description": "Update the keyword lists above with parts of your addresses that are consistent",
+                "tips": [
+                    "Use street names, landmarks, or area names that appear in your addresses",
+                    "Include both Arabic and English variations if applicable",
+                    "Add multiple keywords for each location to handle address variations",
+                    "Test by running the script and checking the trips.json file for actual addresses"
+                ],
+                "example": {
+                    "home_address_keywords": [
+                        "223 متفرع من شارع 90",
+                        "خلف فندق الدوسيت", 
+                        "N Teseen, New Cairo 1"
+                    ],
+                    "work_address_keywords": [
+                        "1 Al Tabeer",
+                        "El-Zaytoun Sharkeya",
+                        "Zeitoun, Cairo"
+                    ]
+                }
+            }
+        }
+        
+        # Save default config
+        with open(config_file_path, 'w', encoding='utf-8') as file:
+            json.dump(default_config, file, ensure_ascii=False, indent=2)
+            
+        print(f"✅ Created default config file: {file_path}")
+        print(f"📝 Please update the keywords in {file_path} with your actual address keywords")
+        print(f"🚫 Script will exit. Please configure your addresses and run again.")
+        exit(1)
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ Error: Invalid JSON format in {file_path}")
+        print(f"JSON Error: {e}")
+        exit(1)
+    except Exception as e:
+        print(f"❌ Error reading config file: {e}")
         exit(1)
 
 # Read the cookie from external file
@@ -274,8 +350,25 @@ def create_monthly_excel_copy(template_file, month_year=None, output_folder=None
     
     return new_filepath
 
-def process_excel_file(excel_file, trips, template_excel_file, home_address, work_address):
+def process_excel_file(excel_file, trips, template_excel_file, home_keywords, work_keywords):
     """Process the Excel file with trip data."""
+    
+    def classify_trip_reason(pickup_location, home_keywords, work_keywords):
+        """Classify trip reason based on pickup location keywords."""
+        pickup_lower = pickup_location.lower()
+        
+        # Check if any home keyword is in the pickup location
+        for keyword in home_keywords:
+            if keyword.lower() in pickup_lower:
+                return "العودة من العمل"  # Return from work
+        
+        # Check if any work keyword is in the pickup location  
+        for keyword in work_keywords:
+            if keyword.lower() in pickup_lower:
+                return "الذهاب إلى العمل"  # Going to work
+                
+        return ""  # Unknown reason
+    
     # Read the Claim Form sheet
     df_claim = pd.read_excel(excel_file, sheet_name="Claim Form", header=None)
     
@@ -286,13 +379,8 @@ def process_excel_file(excel_file, trips, template_excel_file, home_address, wor
     start_row = 7
     
     for i, trip in enumerate(trips):
-        # Determine the reason for the trip based on pickup location
-        if trip["pickup_location"] == home_address:
-            trip_reason = "العودة من العمل"  # Return from work
-        elif trip["pickup_location"] == work_address:
-            trip_reason = "الذهاب إلى العمل"  # Going to work
-        else:
-            trip_reason = ""  # Unknown reason
+        # Determine the reason for the trip based on pickup location keywords
+        trip_reason = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
         
         # Convert the date string to a proper date format
         try:
@@ -328,13 +416,20 @@ def process_excel_file(excel_file, trips, template_excel_file, home_address, wor
         except:
             trip_date = trip["time"]  # fallback if parsing fails
 
+        # Classify trip reason for Excel column
+        trip_reason_en = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
+        trip_reason_excel = ""
+        if trip_reason_en == "العودة من العمل":
+            trip_reason_excel = "From Work"
+        elif trip_reason_en == "الذهاب إلى العمل":
+            trip_reason_excel = "To Work"
+
         row = start_row + i
         ws.cell(row=row, column=2, value=trip_date)  # Column B = Date
         ws.cell(row=row, column=3, value=trip["pickup_location"])
         ws.cell(row=row, column=4, value=trip["dropoff_location"])
         ws.cell(row=row, column=5, value=trip["price"])
-        ws.cell(row=row, column=6, value="To Work" if trip["pickup_location"] == home_address else
-                                      "From Work" if trip["pickup_location"] == work_address else "")
+        ws.cell(row=row, column=6, value=trip_reason_excel)
         ws.cell(row=row, column=7, value="App Wallet")
         ws.cell(row=row, column=8, value="")
 
@@ -530,9 +625,15 @@ if response.status_code == 200:
     cleanup_temp_receipts_folder()
 
     # Now process the Excel file within the same output folder
-    # Define the addresses for determining the trip reason
-    home_address = "223 متفرع من شارع 90 – خلف فندق الدوسيت – التجمع الخامس – القاهرة الجديدة، N Teseen, New Cairo 1, Cairo Governorate 11835, Egypt"
-    work_address = "1 Al Tabeer, El-Zaytoun Sharkeya, Zeitoun, Cairo Governorate 4520120, Egypt"
+    # ========================================================================
+    # LOAD ADDRESS KEYWORDS FROM CONFIG FILE
+    # ========================================================================
+    # Address keywords are now loaded from config.json file.
+    # The script will automatically create a default config.json if it doesn't exist.
+    # Update config.json with keywords that might appear in your addresses.
+    
+    home_address_keywords, work_address_keywords = read_config_from_file()
+    # ========================================================================
 
     # Load the Excel template (original file name)
     template_excel_file = "Private_Taxi_Claim_Form.xlsx"
@@ -542,7 +643,7 @@ if response.status_code == 200:
 
     # Process Excel file
     try:
-        process_excel_file(excel_file, trips, template_excel_file, home_address, work_address)
+        process_excel_file(excel_file, trips, template_excel_file, home_address_keywords, work_address_keywords)
         
         print(f"\n🎉 Monthly report completed!")
         print(f"📁 All files saved in folder: {output_folder}")
