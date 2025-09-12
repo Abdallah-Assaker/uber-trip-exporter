@@ -25,23 +25,67 @@ The script will:
 For detailed instructions, see README.md
 """
 
-import requests
+# Standard library imports
 import json
-import re
 import os
+import re
 import shutil
 import sys
-import pdfkit
-from datetime import datetime, timedelta
 from calendar import monthrange
-from PyPDF2 import PdfMerger
-import pandas as pd
-from datetime import datetime
-from openpyxl import load_workbook
-from openpyxl.styles import NamedStyle
+from datetime import datetime, timedelta
 
-path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
-config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
+# Third-party imports
+import pandas as pd
+import requests
+import time
+from openpyxl import load_workbook
+from PyPDF2 import PdfMerger
+
+# ============================================================================
+# CONSTANTS AND CONFIGURATION
+# ============================================================================
+
+# API Configuration
+UBER_GRAPHQL_URL = "https://riders.uber.com/graphql"
+
+# Console colors for better logging
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    ERROR = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+
+def log(message, level="INFO"):
+    """Enhanced console logging with colors and timestamps"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    if level == "INFO":
+        color = Colors.CYAN
+    elif level == "SUCCESS":
+        color = Colors.GREEN
+    elif level == "WARNING":
+        color = Colors.WARNING
+    elif level == "ERROR":
+        color = Colors.ERROR
+    elif level == "HEADER":
+        color = Colors.HEADER + Colors.BOLD
+    else:
+        color = Colors.ENDC
+    
+    print(f"{color}[{timestamp}] {level}: {message}{Colors.ENDC}")
+
+def log_progress(current, total, message="Processing"):
+    """Show progress with percentage"""
+    percentage = (current / total) * 100 if total > 0 else 0
+    print(f"{Colors.BLUE}[{datetime.now().strftime('%H:%M:%S')}] PROGRESS: {message} [{current}/{total}] ({percentage:.1f}%){Colors.ENDC}")
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
 
 def get_month_date_range(month=None):
     """
@@ -54,6 +98,7 @@ def get_month_date_range(month=None):
     Returns:
         tuple: (start_timestamp_ms, end_timestamp_ms, month_year_string)
     """
+    log("Calculating date range for requested month", "INFO")
     current_date = datetime.now()
     
     if month is None:
@@ -64,9 +109,11 @@ def get_month_date_range(month=None):
         else:
             target_month = current_date.month - 1
             target_year = current_date.year
+        log(f"No month specified, using previous month: {target_month}/{target_year}", "INFO")
     else:
         # Use provided month
         if not 1 <= month <= 12:
+            log(f"Invalid month: {month}. Month must be between 1 and 12", "ERROR")
             raise ValueError("Month must be between 1 and 12")
         
         target_month = month
@@ -74,6 +121,7 @@ def get_month_date_range(month=None):
             target_year = current_date.year - 1
         else:
             target_year = current_date.year
+        log(f"Using specified month: {target_month}/{target_year}", "INFO")
     
     # Calculate start of month (00:00:00)
     start_date = datetime(target_year, target_month, 1)
@@ -89,38 +137,44 @@ def get_month_date_range(month=None):
     # Create month-year string for file naming
     month_year_string = start_date.strftime("%Y-%m")
     
-    print(f"📅 Fetching data for: {start_date.strftime('%B %Y')}")
-    print(f"📅 Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    log(f"Date range calculated: {start_date.strftime('%B %Y')}", "SUCCESS")
+    log(f"Start: {start_date.strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
+    log(f"End: {end_date.strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
     
     return start_timestamp_ms, end_timestamp_ms, month_year_string
 
 def parse_command_line_args():
     """Parse command line arguments for month parameter."""
+    log("Parsing command line arguments", "INFO")
+    
     if len(sys.argv) > 1:
         try:
             month = int(sys.argv[1])
             if not 1 <= month <= 12:
-                print("❌ Error: Month must be between 1 and 12")
+                log("Month must be between 1 and 12", "ERROR")
                 sys.exit(1)
+            log(f"Month parameter provided: {month}", "SUCCESS")
             return month
         except ValueError:
-            print("❌ Error: Month must be a valid integer between 1 and 12")
-            print("Usage: python uber-script.py [month]")
-            print("Example: python uber-script.py 7  (for July)")
+            log("Invalid month parameter. Must be an integer between 1 and 12", "ERROR")
+            log("Usage: python uber-script.py [month]", "INFO")
+            log("Example: python uber-script.py 7  (for July)", "INFO")
             sys.exit(1)
-    return None
+    else:
+        log("No month parameter provided, will use previous month", "INFO")
+        return None
 
-# Parse command line arguments
-target_month = parse_command_line_args()
-
-# Get date range for the target month
-start_time_ms, end_time_ms, month_year = get_month_date_range(target_month)
+# ============================================================================
+# CONFIGURATION AND DATA LOADING FUNCTIONS
+# ============================================================================
 
 def read_token_from_file(file_path="token.txt"):
     """
     Read the authentication token/cookie from a text file.
     The file should contain the cookie string without quotes.
     """
+    log(f"Reading authentication token from {file_path}", "INFO")
+    
     try:
         # Get the directory where the script is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -130,14 +184,15 @@ def read_token_from_file(file_path="token.txt"):
             token = file.read().strip()
             if not token:
                 raise ValueError("Token file is empty")
+            log("Authentication token loaded successfully", "SUCCESS")
             return token
     except FileNotFoundError:
-        print(f"❌ Error: {file_path} not found in the script directory.")
-        print(f"Please create a '{file_path}' file with your authentication cookie.")
-        print("You can copy the cookie from your browser's developer tools.")
+        log(f"{file_path} not found in the script directory", "ERROR")
+        log(f"Please create a '{file_path}' file with your authentication cookie", "ERROR")
+        log("You can copy the cookie from your browser's developer tools", "INFO")
         exit(1)
     except Exception as e:
-        print(f"❌ Error reading token file: {e}")
+        log(f"Error reading token file: {e}", "ERROR")
         exit(1)
 
 def read_config_from_file(file_path="config.json"):
@@ -145,6 +200,8 @@ def read_config_from_file(file_path="config.json"):
     Read address keywords configuration from a JSON file.
     If the file doesn't exist, create it with default values.
     """
+    log(f"Loading address configuration from {file_path}", "INFO")
+    
     try:
         # Get the directory where the script is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -157,23 +214,26 @@ def read_config_from_file(file_path="config.json"):
         if 'home_address_keywords' not in config or 'work_address_keywords' not in config:
             raise ValueError("Config file must contain 'home_address_keywords' and 'work_address_keywords'")
             
-        print(f"✅ Loaded configuration from {file_path}")
+        log(f"Configuration loaded successfully from {file_path}", "SUCCESS")
+        log(f"Home keywords: {len(config['home_address_keywords'])} items", "INFO")
+        log(f"Work keywords: {len(config['work_address_keywords'])} items", "INFO")
         return config['home_address_keywords'], config['work_address_keywords']
         
     except FileNotFoundError:
-        print(f"⚠️ Config file {file_path} not found. Creating default config...")
+        log(f"Config file {file_path} not found. Creating default config...", "WARNING")
         
         # Create default configuration
         default_config = {
             "home_address_keywords": [
-                "YOUR_HOME_STREET_NAME",
-                "YOUR_HOME_LANDMARK", 
-                "YOUR_HOME_AREA"
+                "AZ Zaytoun Al Qebleyah",
+                "Zeitoun",
+                "4520101"
             ],
             "work_address_keywords": [
-                "YOUR_WORK_STREET_NAME",
-                "YOUR_WORK_LANDMARK",
-                "YOUR_WORK_AREA"
+                "223 متفرع من شارع 90",
+                "224 N Teseen St",
+                "4730420",
+                "11835"
             ],
             "_instructions": {
                 "description": "Update the keyword lists above with parts of your addresses that are consistent",
@@ -202,35 +262,49 @@ def read_config_from_file(file_path="config.json"):
         with open(config_file_path, 'w', encoding='utf-8') as file:
             json.dump(default_config, file, ensure_ascii=False, indent=2)
             
-        print(f"✅ Created default config file: {file_path}")
-        print(f"📝 Please update the keywords in {file_path} with your actual address keywords")
-        print(f"🚫 Script will exit. Please configure your addresses and run again.")
+        log(f"Created default config file: {file_path}", "SUCCESS")
+        log(f"Please update the keywords in {file_path} with your actual address keywords", "WARNING")
+        log("Script will exit. Please configure your addresses and run again.", "ERROR")
         exit(1)
         
     except json.JSONDecodeError as e:
-        print(f"❌ Error: Invalid JSON format in {file_path}")
-        print(f"JSON Error: {e}")
+        log(f"Invalid JSON format in {file_path}", "ERROR")
+        log(f"JSON Error: {e}", "ERROR")
         exit(1)
     except Exception as e:
-        print(f"❌ Error reading config file: {e}")
+        log(f"Error reading config file: {e}", "ERROR")
         exit(1)
 
-# Read the cookie from external file
-cookie = read_token_from_file()
+# ============================================================================
+# API FUNCTIONS
+# ============================================================================
 
-url = "https://riders.uber.com/graphql"
+def get_uber_trips(cookie, start_time_ms, end_time_ms, download_receipts=True):
+    """
+    Fetch Uber trips from GraphQL API for the specified time range.
+    
+    Args:
+        cookie (str): Authentication cookie
+        start_time_ms (int): Start timestamp in milliseconds
+        end_time_ms (int): End timestamp in milliseconds
+    
+    Returns:
+        tuple: (trips, overall_amount)
+    """
+    log("Fetching trips from Uber API...", "INFO")
+    
+    url = UBER_GRAPHQL_URL
+    headers = {
+        "cookie": cookie,
+        "content-type": "application/json",
+        "Cache-Control": "no-cache",
+        "User-Agent": "PostmanRuntime/7.45.0",
+        "origin": "https://riders.uber.com",
+        "x-csrf-token": "x",
+    }
 
-headers = {
-    "cookie": cookie,
-    "content-type": "application/json",
-    "Cache-Control": "no-cache",
-    "User-Agent": "PostmanRuntime/7.45.0",
-    "origin": "https://riders.uber.com",
-    "x-csrf-token": "x",
-}
-
-# 1. Query to list trips
-activities_query = """
+    # 1. Query to list trips
+    activities_query = """
 query Activities(
   $cityID: Int
   $endTimeMs: Float
@@ -255,7 +329,7 @@ query Activities(
         uuid
         cardURL
         description
-        subtitle   # 👈 added here
+        subtitle  
         __typename
       }
       nextPageToken
@@ -276,8 +350,8 @@ query Activities(
 }
 """
 
-# 2. Query to get details of a single trip (pickup & dropoff)
-trip_details_query = """
+    # 2. Query to get details of a single trip (pickup & dropoff)
+    trip_details_query = """
 query GetTrip($tripUUID: String!) {
   getTrip(tripUUID: $tripUUID) {
     trip {
@@ -288,8 +362,8 @@ query GetTrip($tripUUID: String!) {
 }
 """
 
-# 3. Receipt query
-receipt_query = """
+    # 3. Receipt query
+    receipt_query = """
 query GetReceipt($tripUUID: String!, $timestamp: String) {
   getReceipt(tripUUID: $tripUUID, timestamp: $timestamp) {
     receiptsForJob {
@@ -301,26 +375,185 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
 }
 """
 
-def download_receipt_pdf(uuid, timestamp, folder="receipts"):
+    # Variables for the activities query
+    variables = {
+        "endTimeMs": end_time_ms,
+        "startTimeMs": start_time_ms,
+        "limit": 60,
+        "includePast": True,
+        "includeUpcoming": False,
+        "orderTypes": ["RIDES", "TRAVEL"],
+        "profileType": "PERSONAL"
+    }
+
+    payload = {
+        "operationName": "Activities",
+        "query": activities_query,
+        "variables": variables,
+    }
+
+    log("Making API request to fetch trip list...", "INFO")
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+    except requests.exceptions.Timeout:
+        log("Timeout while fetching trips from API", "ERROR")
+        return [], 0.0
+    except requests.exceptions.RequestException as e:
+        log(f"Network error while fetching trips: {e}", "ERROR")
+        return [], 0.0
+
+    if response.status_code != 200:
+        log(f"Failed to fetch trips: HTTP {response.status_code}", "ERROR")
+        return [], 0.0
+
+    data = response.json()
+    
+    if not data or "data" not in data or not data["data"]:
+        log("No data returned from API", "ERROR")
+        return [], 0.0
+        
+    activities_data = data["data"].get("activities", {}).get("past", {}).get("activities", [])
+    log(f"Found {len(activities_data)} trips in API response", "INFO")
+
+    trips = []
+    overall_amount = 0.0
+
+    for i, trip in enumerate(activities_data):
+        log_progress(i + 1, len(activities_data), "Processing trips")
+        
+        uuid = trip["uuid"]
+        trip_url = trip["cardURL"]
+        desc = trip.get("description", "")   
+        subtitle = trip.get("subtitle", "")  
+
+        # Parse price from description
+        match = re.search(r"([0-9]+(?:\.[0-9]+)?)", desc)
+        price = float(match.group(1)) if match else 0.0
+        overall_amount += price
+
+        # Check if trip was canceled
+        status = "Canceled" if "canceled" in desc.lower() else "Completed"
+        if status == "Canceled" or "unfulfilled" in desc.lower():
+            log(f"Skipping canceled trip: {uuid}", "WARNING")
+            continue
+
+        pickup_address = ""
+        dropoff_address = ""
+
+        # Fetch trip details (pickup & dropoff addresses)
+        trip_payload = {
+            "operationName": "GetTrip",
+            "query": trip_details_query,
+            "variables": {"tripUUID": uuid},
+        }
+
+        try:
+            detail_resp = requests.post(url, headers=headers, data=json.dumps(trip_payload), timeout=15)
+        except requests.exceptions.Timeout:
+            log(f"Timeout fetching trip details for {uuid}", "WARNING")
+            detail_resp = None
+        except requests.exceptions.RequestException as e:
+            log(f"Network error fetching trip details for {uuid}: {e}", "WARNING")
+            detail_resp = None
+        
+        if detail_resp and detail_resp.status_code == 200:
+            detail_data = detail_resp.json()
+            if detail_data and "data" in detail_data and detail_data["data"]:
+                trip_info = detail_data["data"].get("getTrip", {})
+                if trip_info and "trip" in trip_info:
+                    trip_data = trip_info["trip"]
+                    waypoints = trip_data.get("waypoints", [])
+                    
+                    if len(waypoints) >= 2:
+                        # Waypoints are directly strings, not objects with 'name' property
+                        pickup_address = waypoints[0] if isinstance(waypoints[0], str) else "Unknown pickup"
+                        dropoff_address = waypoints[-1] if isinstance(waypoints[-1], str) else "Unknown dropoff"
+                    else:
+                        log(f"Insufficient waypoint data for trip {uuid}", "WARNING")
+                else:
+                    log(f"No trip data found for {uuid}", "WARNING")
+            else:
+                log(f"No valid data in response for {uuid}", "WARNING")
+        else:
+            log(f"Failed to fetch trip details for {uuid}", "WARNING")
+
+        # Get receipt timestamp and download PDF (if enabled)
+        if download_receipts:
+            timestamp = get_receipt_timestamp(uuid, headers)
+            if timestamp:
+                download_receipt_pdf(uuid, timestamp, headers)
+            else:
+                log(f"No receipt timestamp found for trip {uuid}", "WARNING")
+        else:
+            log(f"Skipping receipt download for trip {uuid} (receipts disabled)", "INFO")
+
+        trips.append({
+            "uuid": uuid,
+            "url": trip_url,
+            "status": status,
+            "price": price,
+            "time": subtitle,
+            "pickup_location": pickup_address,
+            "dropoff_location": dropoff_address,
+        })
+        
+        # Add delay between API calls to avoid rate limiting
+        time.sleep(0.5)
+
+    log(f"Successfully processed {len(trips)} trips", "SUCCESS")
+    log(f"Total amount: ${overall_amount:.2f}", "INFO")
+    
+    return trips, overall_amount
+
+# ============================================================================
+# PDF AND RECEIPT FUNCTIONS
+# ============================================================================
+
+def download_receipt_pdf(uuid, timestamp, headers, folder="receipts", max_retries=3, timeout=30):
+    """Download receipt PDF for a specific trip with retry logic."""
     os.makedirs(folder, exist_ok=True)
     pdf_path = os.path.join(folder, f"{uuid}.pdf")
 
     url = f"https://riders.uber.com/trips/{uuid}/receipt?contentType=PDF&timestamp={timestamp}"
 
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
-        with open(pdf_path, "wb") as f:
-            f.write(resp.content)
-        print(f"✅ Saved {pdf_path}")
-        return pdf_path
-    else:
-        print(f"❌ Failed: {resp.status_code}, {resp.text[:200]}")
-        return None
+    log(f"Downloading receipt for trip {uuid}", "INFO")
+    
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout)
+            if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/pdf"):
+                with open(pdf_path, "wb") as f:
+                    f.write(resp.content)
+                log(f"Successfully saved receipt: {pdf_path}", "SUCCESS")
+                return pdf_path
+            else:
+                log(f"Failed to download receipt for {uuid}: HTTP {resp.status_code}", "WARNING")
+                if attempt < max_retries - 1:
+                    log(f"Retrying download for {uuid} (attempt {attempt + 2}/{max_retries})", "INFO")
+                    time.sleep(2)  # Wait before retry
+                continue
+        except requests.exceptions.Timeout:
+            log(f"Timeout downloading receipt for {uuid} (attempt {attempt + 1}/{max_retries})", "WARNING")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except requests.exceptions.RequestException as e:
+            log(f"Network error downloading receipt for {uuid}: {e}", "WARNING")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except Exception as e:
+            log(f"Unexpected error downloading receipt for {uuid}: {e}", "ERROR")
+            break
+    
+    log(f"Failed to download receipt for {uuid} after {max_retries} attempts", "ERROR")
+    return None
 
 def cleanup_temp_receipts_folder(folder="receipts"):
     """Remove the temporary receipts folder after processing."""
     if os.path.exists(folder):
         shutil.rmtree(folder)
+        log(f"Cleaned up temporary folder: {folder}", "INFO")
+    else:
+        log(f"Temporary folder {folder} not found, skipping cleanup", "INFO")
         print(f"🗑️ Cleaned up temporary folder: {folder}")
 
 def create_monthly_excel_copy(template_file, month_year=None, output_folder=None):
@@ -329,6 +562,8 @@ def create_monthly_excel_copy(template_file, month_year=None, output_folder=None
     If month_year is None, it will use the current month-year.
     If output_folder is None, it will create the file in the current directory.
     """
+    log(f"Creating monthly Excel copy from template: {template_file}", "INFO")
+    
     if month_year is None:
         month_year = datetime.now().strftime("%Y-%m")
     
@@ -346,12 +581,14 @@ def create_monthly_excel_copy(template_file, month_year=None, output_folder=None
     
     # Copy the template to new file
     shutil.copy2(template_file, new_filepath)
-    print(f"✅ Created monthly copy: {new_filepath}")
+    log(f"Created monthly copy: {new_filepath}", "SUCCESS")
     
     return new_filepath
 
 def process_excel_file(excel_file, trips, template_excel_file, home_keywords, work_keywords):
     """Process the Excel file with trip data."""
+    log(f"Processing Excel file: {excel_file}", "INFO")
+    log(f"Processing {len(trips)} trips", "INFO")
     
     def classify_trip_reason(pickup_location, home_keywords, work_keywords):
         """Classify trip reason based on pickup location keywords."""
@@ -369,36 +606,6 @@ def process_excel_file(excel_file, trips, template_excel_file, home_keywords, wo
                 
         return ""  # Unknown reason
     
-    # Read the Claim Form sheet
-    df_claim = pd.read_excel(excel_file, sheet_name="Claim Form", header=None)
-    
-    # Read the Legend sheet
-    df_legend = pd.read_excel(excel_file, sheet_name="Legend")
-    
-    # Fill in the trip data starting from row 8 (index 7 in 0-based)
-    start_row = 7
-    
-    for i, trip in enumerate(trips):
-        # Determine the reason for the trip based on pickup location keywords
-        trip_reason = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
-        
-        # Convert the date string to a proper date format
-        try:
-            trip_dt = datetime.strptime(trip["time"].replace("•", "").strip(), "%b %d %I:%M %p")
-            trip_dt = trip_dt.replace(year=datetime.now().year)  # اضف السنة
-            trip_date = trip_dt.date()
-        except:
-            trip_date = trip["time"]  # Fallback to string if parsing fails
-        
-        # Fill in the row data
-        df_claim.iloc[start_row + i, 1] = trip_date  # Date (Column B)
-        df_claim.iloc[start_row + i, 2] = trip["pickup_location"]  # Pickup location (Column C)
-        df_claim.iloc[start_row + i, 3] = trip["dropoff_location"]  # Dropoff location (Column D)
-        df_claim.iloc[start_row + i, 4] = trip["price"]  # Price (Column E)
-        df_claim.iloc[start_row + i, 5] = trip_reason  # Reason (Column F)
-        df_claim.iloc[start_row + i, 6] = "محفظة التطبيق"  # Payment method (Column G)
-        df_claim.iloc[start_row + i, 7] = ""  # Notes (Column H)
-    
     # Open the workbook (use the monthly copy we created)
     wb = load_workbook(excel_file)
     ws = wb["Claim Form"]
@@ -406,23 +613,27 @@ def process_excel_file(excel_file, trips, template_excel_file, home_keywords, wo
     start_row = 8  # Row 8 in Excel (since Excel rows are 1-based)
 
     for i, trip in enumerate(trips, start=0):
+        log_progress(i + 1, len(trips), "Processing Excel rows")
+        
         # Try to parse the trip date
         try:
-            trip_dt = datetime.strptime(
-                trip["time"].replace("•", "").strip(), "%b %d %I:%M %p"
-            )
-            trip_dt = trip_dt.replace(year=datetime.now().year)  # add year if missing
+            # Primary format: "Aug 31 • 4:29 PM"
+            date_clean = trip["time"].replace("•", "").strip()
+            trip_dt = datetime.strptime(date_clean, "%b %d %I:%M %p")
+            trip_dt = trip_dt.replace(year=datetime.now().year)
             trip_date = trip_dt
         except:
-            trip_date = trip["time"]  # fallback if parsing fails
+            try:
+                # Alternative format: "Aug 31, 2025, 4:29 PM"
+                trip_dt = datetime.strptime(
+                    trip["time"].replace("•", "").strip(), "%b %d, %Y, %I:%M %p"
+                )
+                trip_date = trip_dt
+            except:
+                trip_date = trip["time"]  # fallback if parsing fails
 
         # Classify trip reason for Excel column
-        trip_reason_en = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
-        trip_reason_excel = ""
-        if trip_reason_en == "العودة من العمل":
-            trip_reason_excel = "From Work"
-        elif trip_reason_en == "الذهاب إلى العمل":
-            trip_reason_excel = "To Work"
+        trip_reason_excel = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
 
         row = start_row + i
         ws.cell(row=row, column=2, value=trip_date)  # Column B = Date
@@ -438,34 +649,63 @@ def process_excel_file(excel_file, trips, template_excel_file, home_keywords, wo
 
     # Save changes to the monthly copy
     wb.save(excel_file)
-    print(f"✅ Data written to monthly copy: {excel_file}")
-    print(f"📄 Original template preserved: {template_excel_file}")
+    log(f"Data written to monthly copy: {excel_file}", "SUCCESS")
+    log(f"Original template preserved: {template_excel_file}", "INFO")
   
-def get_receipt_timestamp(uuid):
+def get_receipt_timestamp(uuid, headers):
+    """Get the timestamp for a trip receipt."""
+    url = UBER_GRAPHQL_URL
+    
+    receipt_query = """
+query GetReceipt($tripUUID: String!, $timestamp: String) {
+  getReceipt(tripUUID: $tripUUID, timestamp: $timestamp) {
+    receiptsForJob {
+      timestamp
+      type
+    }
+    receiptData
+  }
+}
+"""
+    
     receipt_payload = {
         "operationName": "GetReceipt",
         "query": receipt_query,
         "variables": {"tripUUID": uuid, "timestamp": ""},
     }
-    receipt_resp = requests.post(url, headers=headers, data=json.dumps(receipt_payload))
+    
+    log(f"Getting receipt timestamp for trip {uuid}", "INFO")
+    try:
+        receipt_resp = requests.post(url, headers=headers, data=json.dumps(receipt_payload), timeout=15)
+    except requests.exceptions.Timeout:
+        log(f"Timeout getting receipt timestamp for {uuid}", "WARNING")
+        return None
+    except requests.exceptions.RequestException as e:
+        log(f"Network error getting receipt timestamp for {uuid}: {e}", "WARNING")
+        return None
+        
     if receipt_resp.status_code == 200:
         receipt_data = receipt_resp.json()
 
         # Defensive checks
         if not receipt_data or "data" not in receipt_data or not receipt_data["data"]:
-            print(f"❌ No data returned for receipt {uuid}")
+            log(f"No data returned for receipt {uuid}", "WARNING")
             return None
 
         receipt_info = receipt_data["data"].get("getReceipt")
         if receipt_info:
             jobs = receipt_info.get("receiptsForJob", [])
             if jobs:
+                log(f"Successfully retrieved timestamp for trip {uuid}", "SUCCESS")
                 return jobs[0]["timestamp"]
     else:
-        print(f"❌ Request failed for {uuid}: {receipt_resp.status_code} {receipt_resp.text[:200]}")
+        log(f"Request failed for {uuid}: {receipt_resp.status_code}", "ERROR")
     return None
 
 def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
+    """Merge all trip receipt PDFs into a single file."""
+    log(f"Merging {len(trips)} receipts into {output_file}", "INFO")
+    
     merger = PdfMerger()
 
     # Sort trips by time desc
@@ -475,136 +715,76 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
         reverse=True
     )
 
+    merged_count = 0
     for trip in sorted_trips:
         pdf_file = os.path.join(folder, f"{trip['uuid']}.pdf")
         if os.path.exists(pdf_file):
             merger.append(pdf_file)
-            print(f"📄 Added {trip['time']} → {pdf_file}")
+            log(f"Added receipt for {trip['time']}", "INFO")
+            merged_count += 1
         else:
-            print(f"⚠️ Missing PDF for {trip['uuid']} ({trip['time']})")
+            log(f"Missing PDF for {trip['uuid']} ({trip['time']})", "WARNING")
 
-    if sorted_trips:
+    if merged_count > 0:
         with open(output_file, "wb") as f:
             merger.write(f)
         merger.close()
-        print(f"✅ Merged {len(sorted_trips)} receipts into {output_file}")
+        log(f"Successfully merged {merged_count} receipts into {output_file}", "SUCCESS")
     else:
-        print("⚠️ No trips available to merge.")
+        log("No trips available to merge", "WARNING")
 
 
 def parse_trip_date(date_str: str):
     """Convert Uber's subtitle string into datetime (adjust format if needed)."""
     try:
-        # Example: "Aug 31, 2025, 10:15 AM"
-        return datetime.strptime(date_str, "%b %d, %Y, %I:%M %p")
-    except Exception as e:
-        print(f"⚠️ Failed to parse date '{date_str}': {e}")
-        return datetime.min    
+        # Primary format: "Aug 31 • 4:29 PM"
+        date_clean = date_str.replace("•", "").strip()
+        trip_dt = datetime.strptime(date_clean, "%b %d %I:%M %p")
+        trip_dt = trip_dt.replace(year=datetime.now().year)
+        return trip_dt
+    except Exception:
+        try:
+            # Alternative format: "Aug 31, 2025, 10:15 AM"
+            return datetime.strptime(date_str, "%b %d, %Y, %I:%M %p")
+        except Exception as e:
+            log(f"Failed to parse date '{date_str}': {e}", "WARNING")
+            return datetime.min    
 
-variables = {
-    "includePast": True,
-    "includeUpcoming": True,
-    "limit": 60,
-    "orderTypes": ["RIDES", "TRAVEL"],
-    "profileType": "PERSONAL",
-    "endTimeMs": end_time_ms,
-    "startTimeMs": start_time_ms,
-}
+# ============================================================================
+# MAIN EXECUTION FUNCTION
+# ============================================================================
 
-payload = {
-    "operationName": "Activities",
-    "query": activities_query,
-    "variables": variables,
-}
-
-response = requests.post(url, headers=headers, data=json.dumps(payload))
-
-if response.status_code == 200:
-    data = response.json()
-    trips = []
-    overall_amount = 0.0
-
-    for trip in data["data"]["activities"]["past"]["activities"]:
-        uuid = trip["uuid"]
-        trip_url = trip["cardURL"]
-        desc = trip.get("description", "")   
-        subtitle = trip.get("subtitle", "")  
-
-        # parse price
-        match = re.search(r"([0-9]+(?:\.[0-9]+)?)", desc)
-        price = float(match.group(1)) if match else 0.0
-        overall_amount += price
-
-        status = "Canceled" if "canceled" in desc.lower() else "Completed"
-        if status == "Canceled" or "unfulfilled" in desc.lower():
-            continue  # Skip canceled and unfulfilled trips
-
-        pickup_address = ""
-        dropoff_address = ""
-        receipt_file = None
-
-        # 2nd request: fetch trip details
-        trip_payload = {
-            "operationName": "GetTrip",
-            "query": trip_details_query,
-            "variables": {"tripUUID": uuid},
-        }
-
-        detail_resp = requests.post(url, headers=headers, data=json.dumps(trip_payload))
-        
-        if detail_resp.status_code != 200:
-            print(f"[ERROR] Failed to fetch details for trip {uuid}. Status: {detail_resp.status_code}")
-            print(f"Payload: {json.dumps(trip_payload, indent=2)}")
-            print(f"Response: {detail_resp.text}")
-        else:
-            print(f"Fetched details for trip {uuid}, status: {detail_resp.status_code}")
-
-        if detail_resp.status_code == 200:
-            trip_data = detail_resp.json()
-            waypoints = trip_data["data"]["getTrip"]["trip"]["waypoints"]
-            if waypoints and len(waypoints) >= 2:
-              pickup_address = waypoints[0]
-              dropoff_address = waypoints[-1]
-        else:
-            print(f"[ERROR] {uuid}: {detail_resp.status_code} {detail_resp.text}")
-
-            for wp in waypoints:
-              addr = wp.get("address", {})
-              full_address = f"{addr.get('title','')} {addr.get('subtitle','')}".strip()
-              if wp["type"] == "PICKUP":
-                  pickup_address = full_address
-              elif wp["type"] == "DROPOFF":
-                  dropoff_address = full_address
-
-        # Get receipt timestamp
-        timestamp = get_receipt_timestamp(uuid)
-
-        if timestamp:
-            # Download receipt PDF
-            download_receipt_pdf(uuid, timestamp)
-        else:
-            print(f"❌ No timestamp found for trip {uuid}")
-
-        trips.append({
-            "uuid": uuid,
-            "url": trip_url,
-            "status": status,
-            "price": price,
-            "time": subtitle,
-            "pickup_location": pickup_address,
-            "dropoff_location": dropoff_address,
-        })
-
+def main():
+    """Main function that orchestrates the entire Uber trip export process."""
+    log("🚀 Starting Uber Trip Exporter", "HEADER")
+    
+    # Parse command line arguments
+    target_month = parse_command_line_args()
+    
+    # Get date range for the target month
+    start_time_ms, end_time_ms, month_year = get_month_date_range(target_month)
+    
+    # Read authentication token
+    cookie = read_token_from_file()
+    
+    # Fetch trips from Uber API (with receipts using improved timeout handling)
+    trips, overall_amount = get_uber_trips(cookie, start_time_ms, end_time_ms, download_receipts=True)
+    
+    if not trips:
+        log("No trips found for the specified period", "WARNING")
+        return
+    
     # Create month-specific output folder
     output_folder = month_year
     os.makedirs(output_folder, exist_ok=True)
-    print(f"📁 Created output folder: {output_folder}")
+    log(f"Created output folder: {output_folder}", "SUCCESS")
 
     # Create month-specific output file paths
     monthly_receipts_file = os.path.join(output_folder, "all_receipts.pdf")
     monthly_trips_file = os.path.join(output_folder, "trips.json")
 
     # Save trips data with month prefix
+    log("Saving trip data to JSON file", "INFO")
     with open(monthly_trips_file, "w", encoding="utf-8") as f:
         json.dump({
             "overall_amount": round(overall_amount, 2),
@@ -616,7 +796,7 @@ if response.status_code == 200:
             }
         }, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Saved {len(trips)} trips to {monthly_trips_file} (total: {round(overall_amount, 2)})")
+    log(f"Saved {len(trips)} trips to {monthly_trips_file} (total: ${overall_amount:.2f})", "SUCCESS")
     
     # Merge receipts with month-specific filename
     merge_receipts(trips, output_file=monthly_receipts_file)
@@ -624,16 +804,9 @@ if response.status_code == 200:
     # Clean up temporary receipts folder
     cleanup_temp_receipts_folder()
 
-    # Now process the Excel file within the same output folder
-    # ========================================================================
-    # LOAD ADDRESS KEYWORDS FROM CONFIG FILE
-    # ========================================================================
-    # Address keywords are now loaded from config.json file.
-    # The script will automatically create a default config.json if it doesn't exist.
-    # Update config.json with keywords that might appear in your addresses.
-    
+    # Load address keywords from config file
+    log("Loading address configuration", "INFO")
     home_address_keywords, work_address_keywords = read_config_from_file()
-    # ========================================================================
 
     # Load the Excel template (original file name)
     template_excel_file = "Private_Taxi_Claim_Form.xlsx"
@@ -645,15 +818,24 @@ if response.status_code == 200:
     try:
         process_excel_file(excel_file, trips, template_excel_file, home_address_keywords, work_address_keywords)
         
-        print(f"\n🎉 Monthly report completed!")
-        print(f"📁 All files saved in folder: {output_folder}")
-        print(f"   - trips.json (trip data)")
-        print(f"   - all_receipts.pdf (merged receipts)")
-        print(f"   - {month_year}_Private_Taxi_Claim_Form.xlsx (claim form)")
+        log("Monthly report completed successfully!", "HEADER")
+        log(f"All files saved in folder: {output_folder}", "SUCCESS")
+        log("Files created:", "INFO")
+        log("  - trips.json (trip data)", "INFO")
+        log("  - all_receipts.pdf (merged receipts)", "INFO")
+        log(f"  - {month_year}_Private_Taxi_Claim_Form.xlsx (claim form)", "INFO")
         
     except Exception as e:
-        print(f"❌ Error processing Excel file: {e}")
+        log(f"Error processing Excel file: {e}", "ERROR")
+        raise
 
-else:
-    print("Error:", response.status_code, response.text)
-    sys.exit(1)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        log("Script interrupted by user", "WARNING")
+        sys.exit(1)
+    except Exception as e:
+        log(f"Script failed with error: {e}", "ERROR")
+        sys.exit(1)

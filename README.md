@@ -7,13 +7,16 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 
 ## 🚀 Features
 
-- **Automated Data Extraction**: Fetches trip data from Uber's GraphQL API
-- **Smart Address Matching**: Uses keywords to classify trips as "To Work" or "From Work"
-- **Receipt Management**: Downloads and merges all trip receipts into a single PDF
-- **Excel Integration**: Automatically fills out company expense claim forms
-- **Month-Specific Organization**: Creates organized folders for each month's data
-- **Secure Token Management**: Uses external token file for easy monthly updates
-- **Easy Sharing**: Share with colleagues without exposing your credentials
+- **✨ External Configuration**: Uses JSON config files for easy customization without code editing
+- **🔍 Automated Data Extraction**: Fetches trip data from Uber's GraphQL API
+- **🏠 Smart Address Matching**: Uses configurable keywords to classify trips as "To Work" or "From Work"
+- **📄 Receipt Management**: Downloads and merges all trip receipts into a single PDF
+- **📊 Excel Integration**: Automatically fills out company expense claim forms
+- **📁 Month-Specific Organization**: Creates organized folders for each month's data
+- **🔐 Secure Token Management**: Uses external token file for easy monthly updates
+- **🎛️ Command Line Parameters**: Accepts month parameter for flexible data extraction
+- **📝 Enhanced Logging**: Colored console output with progress indicators and timestamps
+- **🤝 Easy Sharing**: Share with colleagues without exposing your credentials
 
 ## 📋 Prerequisites
 
@@ -31,12 +34,8 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 
 2. **Install dependencies**
    ```bash
-   pip install requests pandas openpyxl PyPDF2 pdfkit
+   pip install requests pandas openpyxl PyPDF2
    ```
-
-3. **Install wkhtmltopdf**
-   - Download from: https://wkhtmltopdf.org/downloads.html
-   - Install to default location: `C:\Program Files\wkhtmltopdf\`
 
 ## 🔧 Setup
 
@@ -117,6 +116,10 @@ The config file format:
 
 ## 🚀 Usage
 
+### Command Line Interface
+
+The script now features **enhanced console logging** with colored output, progress indicators, and timestamps for better user experience.
+
 ### Basic Usage (Previous Month)
 ```bash
 python uber-script.py
@@ -130,7 +133,7 @@ python uber-script.py [month]
 **Examples:**
 ```bash
 python uber-script.py 7     # Fetch July data
-python uber-script.py 12    # Fetch December data (previous year)
+python uber-script.py 12    # Fetch December data (previous year)  
 python uber-script.py 1     # Fetch January data (current year)
 ```
 
@@ -139,15 +142,21 @@ python uber-script.py 1     # Fetch January data (current year)
 - **Month 1-11**: Uses current year
 - **Month 12 (December)**: Uses previous year (for year-end reporting)
 
+### Console Output Features
+- 🎨 **Colored logging**: Different colors for INFO, SUCCESS, WARNING, ERROR messages
+- ⏱️ **Timestamps**: Each log entry shows the current time
+- 📊 **Progress indicators**: Shows progress when processing multiple trips
+- 🔄 **Real-time feedback**: Live updates on API calls, file operations, and Excel processing
+
 ### What the script does:
-1. ✅ Calculates date range for the specified month/year
-2. ✅ Creates a month-specific output folder (YYYY-MM format)
-3. ✅ Fetches your Uber trips for that period
-4. ✅ Downloads receipt PDFs to temporary folder
-5. ✅ Creates monthly Excel claim form in the output folder
-6. ✅ Merges all receipts into `all_receipts.pdf` in the output folder
-7. ✅ Saves trip data to `trips.json` in the output folder
-8. ✅ Cleans up temporary receipt files
+1. ✅ **Date Calculation**: Calculates date range for the specified month/year
+2. 📁 **Folder Creation**: Creates a month-specific output folder (YYYY-MM format)
+3. 🔍 **Data Fetching**: Fetches your Uber trips for that period with progress tracking
+4. 📄 **Receipt Download**: Downloads receipt PDFs with individual status updates
+5. 📊 **Excel Processing**: Creates monthly Excel claim form with progress indicators
+6. 📑 **PDF Merging**: Merges all receipts into `all_receipts.pdf` with detailed logging
+7. 💾 **Data Saving**: Saves trip data to `trips.json` with confirmation
+8. 🧹 **Cleanup**: Cleans up temporary receipt files with status reports
 9. ✅ Preserves original Excel template
 
 ## 📁 Output Structure
@@ -177,22 +186,43 @@ project-folder/
 3. **Find Output**: Navigate to the `YYYY-MM/` folder created by the script
 4. **Submit Forms**: Use the Excel file and merged PDF from the month folder for reimbursement
 
-## 🤝 Sharing with Colleagues
-
-To share this script:
-
-1. **Fork/Clone** this repository
-2. **Remove your `token.txt`** (it's already in `.gitignore`)
-3. **Share the folder** with colleagues
-4. **Each person creates their own `token.txt`**
-5. **Each person updates their home/work addresses**
-
 ## 🛡️ Security Notes
 
 - The `token.txt` file is automatically ignored by Git
 - Never commit authentication tokens to version control
 - Update your token monthly or when authentication fails
 - Each user should have their own `token.txt` file
+
+### Script Architecture
+
+```
+uber-script.py
+├── 🔧 Configuration Management
+│   ├── read_token_from_file()
+│   └── read_config_from_file()
+├── 📅 Date & Time Utilities  
+│   ├── get_month_date_range()
+│   └── parse_command_line_args()
+├── 🌐 API Functions
+│   └── get_uber_trips()
+├── 📄 PDF & Receipt Management
+│   ├── download_receipt_pdf()
+│   ├── get_receipt_timestamp()
+│   └── merge_receipts()
+├── 📊 Excel Processing
+│   ├── create_monthly_excel_copy()
+│   └── process_excel_file()
+└── 🎯 Main Execution
+    └── main()
+```
+
+### Dependencies Simplified
+
+**Current Dependencies:**
+- ✅ `requests` - API calls
+- ✅ `pandas` - Excel data manipulation
+- ✅ `openpyxl` - Excel file handling
+- ✅ `PyPDF2` - PDF merging
 
 ## 🐛 Troubleshooting
 
@@ -219,15 +249,32 @@ To share this script:
 3. Find consistent parts and add them to keyword lists
 4. Re-run the script to test classification
 
+### Enhanced Debugging with New Logging
+
+The script now provides **detailed colored console output** to help with troubleshooting:
+
+- 🔍 **API Progress**: See real-time API call status and response details
+- 📊 **Trip Processing**: Progress indicators show which trips are being processed
+- 📁 **File Operations**: Clear feedback on file creation, Excel writing, and PDF merging
+- ⚠️ **Warning Messages**: Detailed warnings for missing data or classification issues
+- ❌ **Error Details**: Specific error messages with context for easier debugging
+
+**Tips for using the enhanced logging:**
+- 🎨 **Colors**: Green = Success, Blue = Info, Yellow = Warning, Red = Error
+- ⏱️ **Timestamps**: Each message shows exactly when it occurred
+- 📈 **Progress**: Watch the `[X/Y]` indicators to see processing status
+
 ### Missing Output Files
 - Check the month-specific folder (e.g., `2025-09/`)
 - Files are organized in folders, not in the main directory
 - Look for the pattern `YYYY-MM/` where YYYY-MM matches your target month
+- Console output will show exactly which folder was created
 
 ### No Data Found
 - Verify you had Uber trips in the specified month/year
 - Check if the month logic is correct (December uses previous year)
 - Ensure your date range covers the intended period
+- Console shows exact date range being queried
 
 ### Missing Receipts
 - Check internet connection
