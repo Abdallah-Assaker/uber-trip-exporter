@@ -31,8 +31,10 @@ import os
 import re
 import shutil
 import sys
+import zipfile
 from calendar import monthrange
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Third-party imports
 import pandas as pd
@@ -40,6 +42,11 @@ import requests
 import time
 from openpyxl import load_workbook
 from PyPDF2 import PdfMerger
+
+try:
+    from redmail import EmailSender
+except ImportError:
+    EmailSender = None
 
 # ============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -197,10 +204,10 @@ def read_token_from_file(file_path="token.txt"):
 
 def read_config_from_file(file_path="config.json"):
     """
-    Read address keywords configuration from a JSON file.
+    Read address keywords and email configuration from a JSON file.
     If the file doesn't exist, create it with default values.
     """
-    log(f"Loading address configuration from {file_path}", "INFO")
+    log(f"Loading configuration from {file_path}", "INFO")
     
     try:
         # Get the directory where the script is located
@@ -213,11 +220,21 @@ def read_config_from_file(file_path="config.json"):
         # Validate required keys
         if 'home_address_keywords' not in config or 'work_address_keywords' not in config:
             raise ValueError("Config file must contain 'home_address_keywords' and 'work_address_keywords'")
-            
+        
+        # Check for email configuration (optional)
+        email_config = config.get('email_config', {})
+        
         log(f"Configuration loaded successfully from {file_path}", "SUCCESS")
         log(f"Home keywords: {len(config['home_address_keywords'])} items", "INFO")
         log(f"Work keywords: {len(config['work_address_keywords'])} items", "INFO")
-        return config['home_address_keywords'], config['work_address_keywords']
+        
+        if email_config:
+            email_enabled = email_config.get('enabled', False)
+            log(f"Email functionality: {'enabled' if email_enabled else 'disabled'}", "INFO")
+        else:
+            log("Email configuration not found - email functionality disabled", "WARNING")
+            
+        return config['home_address_keywords'], config['work_address_keywords'], email_config
         
     except FileNotFoundError:
         log(f"Config file {file_path} not found. Creating default config...", "WARNING")
@@ -235,8 +252,30 @@ def read_config_from_file(file_path="config.json"):
                 "4730420",
                 "11835"
             ],
+            "email_config": {
+                "enabled": False,
+                "recipient_email": "your-work-email@company.com",
+                "sender_email": "your-sender-email@gmail.com",
+                "sender_password": "your-app-password",
+                "smtp_server": "smtp.gmail.com",
+                "smtp_port": 587,
+                "subject_template": "Uber Trip Report - {month_year}",
+                "body_template": "Please find attached the Uber trip report for {month_year}.\n\nTotal amount: ${total_amount}\nNumber of trips: {trip_count}\n\nBest regards,\nUber Trip Exporter"
+            },
             "_instructions": {
                 "description": "Update the keyword lists above with parts of your addresses that are consistent",
+                "email_setup": {
+                    "description": "Configure email settings to automatically send trip reports",
+                    "steps": [
+                        "1. Set 'enabled' to true to enable email functionality",
+                        "2. Update 'recipient_email' with your work email address",
+                        "3. For Gmail: use your Gmail address as 'sender_email'",
+                        "4. For Gmail: generate an App Password (not your regular password)",
+                        "5. Update 'sender_password' with the App Password",
+                        "6. For other email providers: update smtp_server and smtp_port accordingly"
+                    ],
+                    "gmail_app_password_guide": "https://support.google.com/accounts/answer/185833"
+                },
                 "tips": [
                     "Use street names, landmarks, or area names that appear in your addresses",
                     "Include both Arabic and English variations if applicable",
@@ -264,6 +303,7 @@ def read_config_from_file(file_path="config.json"):
             
         log(f"Created default config file: {file_path}", "SUCCESS")
         log(f"Please update the keywords in {file_path} with your actual address keywords", "WARNING")
+        log("Email functionality is disabled by default. Configure email settings if needed.", "INFO")
         log("Script will exit. Please configure your addresses and run again.", "ERROR")
         exit(1)
         
@@ -751,6 +791,179 @@ def parse_trip_date(date_str: str):
             return datetime.min    
 
 # ============================================================================
+# EMAIL AND ZIP FUNCTIONS
+# ============================================================================
+
+def create_zip_archive(source_folder, zip_filename):
+    """
+    Create a ZIP archive of the specified folder.
+    
+    Args:
+        source_folder (str): Path to the folder to compress
+        zip_filename (str): Name of the output ZIP file
+    
+    Returns:
+        str: Path to the created ZIP file or None if failed
+    """
+    log(f"Creating ZIP archive: {zip_filename}", "INFO")
+    
+    try:
+        with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Walk through all files in the source folder
+            for root, dirs, files in os.walk(source_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Calculate the relative path for the file in the ZIP
+                    arcname = os.path.relpath(file_path, os.path.dirname(source_folder))
+                    zip_file.write(file_path, arcname)
+                    log(f"Added to ZIP: {arcname}", "INFO")
+        
+        # Check if ZIP file was created and get its size
+        if os.path.exists(zip_filename):
+            zip_size = os.path.getsize(zip_filename)
+            log(f"ZIP archive created successfully: {zip_filename} ({zip_size / (1024*1024):.1f} MB)", "SUCCESS")
+            return zip_filename
+        else:
+            log("ZIP file was not created", "ERROR")
+            return None
+            
+    except Exception as e:
+        log(f"Error creating ZIP archive: {e}", "ERROR")
+        return None
+
+def validate_email_address(email):
+    """
+    Basic email validation.
+    
+    Args:
+        email (str): Email address to validate
+    
+    Returns:
+        bool: True if email is valid, False otherwise
+    """
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def send_email_with_attachment(email_config, zip_file_path, month_year, total_amount, trip_count):
+    """
+    Send email with ZIP file attachment using Red Mail.
+    
+    Args:
+        email_config (dict): Email configuration from config.json
+        zip_file_path (str): Path to the ZIP file to attach
+        month_year (str): Month-year string for email subject/body
+        total_amount (float): Total trip amount for email body
+        trip_count (int): Number of trips for email body
+    
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    log("Preparing to send email with ZIP attachment using Red Mail", "INFO")
+    
+    # Check if Red Mail is available
+    if EmailSender is None:
+        log("Red Mail library not installed. Please install it with: pip install redmail", "ERROR")
+        return False
+    
+    # Validate email configuration
+    required_fields = ['recipient_email', 'sender_email', 'sender_password', 'smtp_server', 'smtp_port']
+    for field in required_fields:
+        if field not in email_config or not email_config[field]:
+            log(f"Missing required email configuration: {field}", "ERROR")
+            return False
+    
+    # Validate email addresses
+    if not validate_email_address(email_config['recipient_email']):
+        log(f"Invalid recipient email: {email_config['recipient_email']}", "ERROR")
+        return False
+    
+    if not validate_email_address(email_config['sender_email']):
+        log(f"Invalid sender email: {email_config['sender_email']}", "ERROR")
+        return False
+    
+    # Check if ZIP file exists
+    if not os.path.exists(zip_file_path):
+        log(f"ZIP file not found: {zip_file_path}", "ERROR")
+        return False
+    
+    try:
+        # Initialize Red Mail EmailSender
+        log(f"Connecting to SMTP server: {email_config['smtp_server']}:{email_config['smtp_port']}", "INFO")
+        
+        email_sender = EmailSender(
+            host=email_config['smtp_server'],
+            port=email_config['smtp_port'],
+            username=email_config['sender_email'],
+            password=email_config['sender_password'],
+            use_starttls=True  # Use STARTTLS for security
+        )
+        
+        # Format subject
+        subject_template = email_config.get('subject_template', 'Uber Trip Report - {month_year}')
+        subject = subject_template.format(month_year=month_year)
+        
+        # Format body
+        body_template = email_config.get('body_template', 
+            'Please find attached the Uber trip report for {month_year}.\n\n'
+            'Total amount: ${total_amount}\n'
+            'Number of trips: {trip_count}\n\n'
+            'Best regards,\n'
+            'Uber Trip Exporter')
+        
+        body = body_template.format(
+            month_year=month_year,
+            total_amount=total_amount,
+            trip_count=trip_count
+        )
+        
+        # HTML version of the body for better formatting
+        html_body = f"""
+        <html>
+        <body>
+            <h2>Uber Trip Report - {month_year}</h2>
+            <p>Please find attached the Uber trip report for <strong>{month_year}</strong>.</p>
+            <ul>
+                <li><strong>Total amount:</strong> ${total_amount}</li>
+                <li><strong>Number of trips:</strong> {trip_count}</li>
+            </ul>
+            <p>Best regards,<br>Uber Trip Exporter</p>
+        </body>
+        </html>
+        """
+        
+        log(f"Sending email to: {email_config['recipient_email']}", "INFO")
+        
+        # Send email with attachment using Red Mail
+        email_sender.send(
+            subject=subject,
+            sender=email_config['sender_email'],
+            receivers=[email_config['recipient_email']],
+            text=body,
+            html=html_body,
+            attachments={
+                os.path.basename(zip_file_path): Path(zip_file_path)
+            }
+        )
+        
+        log("Email sent successfully with Red Mail! 📧", "SUCCESS")
+        return True
+        
+    except Exception as e:
+        log(f"Error sending email with Red Mail: {e}", "ERROR")
+        
+        # Provide helpful error messages for common issues
+        if "authentication" in str(e).lower():
+            log("Authentication failed. Please check your email credentials.", "WARNING")
+            log("For Gmail: Ensure you're using an App Password, not your regular password", "WARNING")
+        elif "connection" in str(e).lower():
+            log("Connection failed. Please check your SMTP server settings.", "WARNING")
+        elif "permission" in str(e).lower() or "denied" in str(e).lower():
+            log("Permission denied. Check your email provider's security settings.", "WARNING")
+        
+        return False    
+
+# ============================================================================
 # MAIN EXECUTION FUNCTION
 # ============================================================================
 
@@ -806,7 +1019,7 @@ def main():
 
     # Load address keywords from config file
     log("Loading address configuration", "INFO")
-    home_address_keywords, work_address_keywords = read_config_from_file()
+    home_address_keywords, work_address_keywords, email_config = read_config_from_file()
 
     # Load the Excel template (original file name)
     template_excel_file = "Private_Taxi_Claim_Form.xlsx"
@@ -824,6 +1037,42 @@ def main():
         log("  - trips.json (trip data)", "INFO")
         log("  - all_receipts.pdf (merged receipts)", "INFO")
         log(f"  - {month_year}_Private_Taxi_Claim_Form.xlsx (claim form)", "INFO")
+        
+        # Create ZIP archive and send email if enabled
+        if email_config and email_config.get('enabled', False):
+            log("Creating ZIP archive for email...", "INFO")
+            zip_filename = f"{month_year}_uber_trip_report.zip"
+            zip_path = create_zip_archive(output_folder, zip_filename)
+            
+            if zip_path:
+                log("Sending email with ZIP attachment...", "INFO")
+                email_sent = send_email_with_attachment(
+                    email_config, 
+                    zip_path, 
+                    month_year, 
+                    overall_amount, 
+                    len(trips)
+                )
+                
+                if email_sent:
+                    log("Email sent successfully! 📧", "SUCCESS")
+                    
+                    # Optionally clean up the ZIP file after sending
+                    try:
+                        os.remove(zip_path)
+                        log(f"Cleaned up ZIP file: {zip_path}", "INFO")
+                    except Exception as e:
+                        log(f"Could not clean up ZIP file: {e}", "WARNING")
+                else:
+                    log("Failed to send email. ZIP file preserved for manual sending.", "WARNING")
+                    log(f"ZIP file location: {zip_path}", "INFO")
+            else:
+                log("Failed to create ZIP archive. Email not sent.", "ERROR")
+        else:
+            if email_config and not email_config.get('enabled', False):
+                log("Email functionality is disabled in config. Set 'enabled' to true to send emails.", "INFO")
+            else:
+                log("No email configuration found. Files saved locally only.", "INFO")
         
     except Exception as e:
         log(f"Error processing Excel file: {e}", "ERROR")

@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A Python automation script that extracts Uber trip data and generates monthly transportation expense reports for company reimbursement.
+A Python automation script that extracts Uber trip data and generates monthly transportation expense reports for company reimbursement with automatic email delivery.
 
 ## 🚀 Features
 
@@ -13,6 +13,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 - **📄 Receipt Management**: Downloads and merges all trip receipts into a single PDF
 - **📊 Excel Integration**: Automatically fills out company expense claim forms
 - **📁 Month-Specific Organization**: Creates organized folders for each month's data
+- **📧 Email Automation**: Automatically compresses and emails monthly reports (NEW!)
 - **🔐 Secure Token Management**: Uses external token file for easy monthly updates
 - **🎛️ Command Line Parameters**: Accepts month parameter for flexible data extraction
 - **📝 Enhanced Logging**: Colored console output with progress indicators and timestamps
@@ -34,7 +35,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 
 2. **Install dependencies**
    ```bash
-   pip install requests pandas openpyxl PyPDF2
+   pip install requests pandas openpyxl PyPDF2 redmail
    ```
 
 ## 🔧 Setup
@@ -59,7 +60,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 marketing_vistor_id=abc123; udi-id=def456; isWebLogin=true; sid=xyz789; ...
 ```
 
-### 3. Configure Address Keywords
+### 3. Configure Address Keywords & Email Settings
 
 The script uses keyword-based matching to classify trips as "To Work" or "From Work" since Uber addresses may vary slightly due to location accuracy.
 
@@ -82,9 +83,21 @@ The config file format:
     "YOUR_WORK_STREET_NAME",
     "YOUR_WORK_LANDMARK",
     "YOUR_WORK_AREA"
-  ]
+  ],
+  "email_config": {
+    "enabled": false,
+    "recipient_email": "your-work-email@company.com",
+    "sender_email": "your-sender-email@gmail.com",
+    "sender_password": "your-app-password",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "subject_template": "Uber Trip Report - {month_year}",
+    "body_template": "Please find attached the Uber trip report for {month_year}.\n\nTotal amount: ${total_amount}\nNumber of trips: {trip_count}\n\nBest regards,\nUber Trip Exporter"
+  }
 }
 ```
+
+#### Address Keywords Configuration
 
 **Update this file** with actual keywords from your addresses:
 
@@ -113,6 +126,49 @@ The config file format:
 - ❌ Avoid full addresses that may vary
 - ❌ Don't use building numbers that might change (e.g., 223 vs 224)
 - 🔍 Test by checking actual addresses in the generated `trips.json` file
+
+#### Email Configuration (Optional)
+
+The script can automatically compress monthly reports into ZIP files and email them to you. This feature uses **Red Mail**, a modern Python email library.
+
+**To enable email functionality:**
+
+1. **Set `enabled` to `true`** in the email_config section
+2. **Configure your email settings:**
+
+**For Gmail (Recommended):**
+```json
+{
+  "email_config": {
+    "enabled": true,
+    "recipient_email": "your-work@company.com",
+    "sender_email": "your-gmail@gmail.com",
+    "sender_password": "your-app-password",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587
+  }
+}
+```
+
+**Gmail Setup Steps:**
+1. Enable 2-Factor Authentication on your Gmail account
+2. Generate an App Password: [Google App Passwords Guide](https://support.google.com/accounts/answer/185833)
+3. Use the App Password (not your regular password) in the config
+4. Update sender_email with your Gmail address
+5. Update recipient_email with where you want to receive reports
+
+**For Other Email Providers:**
+- **Outlook/Hotmail**: `smtp-mail.outlook.com:587`
+- **Yahoo**: `smtp.mail.yahoo.com:587`
+- **Custom SMTP**: Update smtp_server and smtp_port accordingly
+
+**Email Features:**
+- 📦 **Automatic ZIP compression** of monthly folders
+- 📧 **HTML and plain text** email formats
+- 🎨 **Professional email templates** with trip summary
+- 🔒 **Secure STARTTLS encryption**
+- 🧹 **Automatic cleanup** of temporary files
+- ⚠️ **Detailed error handling** with helpful messages
 
 ## 🚀 Usage
 
@@ -156,8 +212,10 @@ python uber-script.py 1     # Fetch January data (current year)
 5. 📊 **Excel Processing**: Creates monthly Excel claim form with progress indicators
 6. 📑 **PDF Merging**: Merges all receipts into `all_receipts.pdf` with detailed logging
 7. 💾 **Data Saving**: Saves trip data to `trips.json` with confirmation
-8. 🧹 **Cleanup**: Cleans up temporary receipt files with status reports
-9. ✅ Preserves original Excel template
+8. 📦 **ZIP Compression**: Compresses monthly folder for easy sharing (if email enabled)
+9. 📧 **Email Delivery**: Sends professional email with ZIP attachment (if configured)
+10. 🧹 **Cleanup**: Cleans up temporary files with status reports
+11. ✅ Preserves original Excel template
 
 ## 📁 Output Structure
 
@@ -181,10 +239,35 @@ project-folder/
 
 ## 🔄 Monthly Workflow
 
+### Option 1: Local Files Only (Email Disabled)
 1. **Update Token**: Get fresh cookie from browser → Update `token.txt`
 2. **Run Script**: `python uber-script.py [month]` (e.g., `python uber-script.py 7` for July)
 3. **Find Output**: Navigate to the `YYYY-MM/` folder created by the script
 4. **Submit Forms**: Use the Excel file and merged PDF from the month folder for reimbursement
+
+### Option 2: Automatic Email Delivery (Email Enabled)
+1. **Update Token**: Get fresh cookie from browser → Update `token.txt`
+2. **Run Script**: `python uber-script.py [month]` (e.g., `python uber-script.py 7` for July)
+3. **Check Email**: Receive professional email with ZIP attachment containing all files
+4. **Submit Forms**: Download ZIP attachment and submit for reimbursement
+
+**Email Sample:**
+```
+Subject: Uber Trip Report - 2025-08
+
+Please find attached the Uber trip report for 2025-08.
+
+Total amount: $5,421.70
+Number of trips: 24
+
+The attached ZIP file contains:
+- trips.json (trip data)  
+- all_receipts.pdf (merged receipts)
+- Excel claim form
+
+Best regards,
+Uber Trip Exporter
+```
 
 ## 🛡️ Security Notes
 
@@ -223,6 +306,7 @@ uber-script.py
 - ✅ `pandas` - Excel data manipulation
 - ✅ `openpyxl` - Excel file handling
 - ✅ `PyPDF2` - PDF merging
+- ✅ `redmail` - Modern email sending (NEW!)
 
 ## 🐛 Troubleshooting
 
@@ -230,6 +314,19 @@ uber-script.py
 - Get a fresh cookie from your browser
 - Update `token.txt` with the new cookie
 - Ensure no extra quotes or spaces in the token file
+
+### Email Issues
+- **Authentication Failed**: 
+  - For Gmail: Ensure 2FA is enabled and you're using an App Password
+  - Check that sender_email and sender_password are correct
+  - Verify the App Password doesn't contain spaces
+- **Connection Failed**:
+  - Check internet connection
+  - Verify SMTP server settings (smtp.gmail.com:587 for Gmail)
+  - Try again in a few moments
+- **Permission Denied**:
+  - Check email provider's security settings
+  - Ensure "Less secure app access" is not blocking the connection (use App Passwords instead)
 
 ### Invalid Month Parameter
 - Month must be an integer between 1 and 12

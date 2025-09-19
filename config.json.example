@@ -11,20 +11,71 @@
     "Zeitoun, Cairo",
     "الطابير"
   ],
+  "email_config": {
+    "enabled": false,
+    "recipient_email": "your-work-email@company.com",
+    "sender_email": "your-sender-email@gmail.com",
+    "sender_password": "your-app-password",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "subject_template": "Uber Trip Report - {month_year}",
+    "body_template": "Please find attached the Uber trip report for {month_year}.\n\nTotal amount: ${total_amount}\nNumber of trips: {trip_count}\n\nBest regards,\nUber Trip Exporter"
+  },
   "_instructions": {
-    "description": "Update the keyword lists above with parts of your addresses that are consistent",
-    "tips": [
-      "Use street names, landmarks, or area names that appear in your addresses",
-      "Include both Arabic and English variations if applicable", 
-      "Add multiple keywords for each location to handle address variations",
-      "Test by running the script and checking the trips.json file for actual addresses"
-    ],
-    "setup_steps": [
-      "1. Copy this file to config.json",
-      "2. Update home_address_keywords with parts of your home address",
-      "3. Update work_address_keywords with parts of your work address",
-      "4. Run the script and check trips.json to see actual addresses used",
-      "5. Adjust keywords as needed for better matching"
-    ]
+    "description": "Configuration file for Uber Trip Exporter",
+    "address_keywords": {
+      "description": "Update the keyword lists with parts of your addresses that are consistent",
+      "tips": [
+        "Use street names, landmarks, or area names that appear in your addresses",
+        "Include both Arabic and English variations if applicable",
+        "Add multiple keywords for each location to handle address variations",
+        "Test by running the script and checking the trips.json file for actual addresses"
+      ],
+      "setup_steps": [
+        "1. Copy this file to config.json",
+        "2. Update home_address_keywords with parts of your home address",
+        "3. Update work_address_keywords with parts of your work address",
+        "4. Run the script and check trips.json to see actual addresses used",
+        "5. Adjust keywords as needed for better matching"
+      ]
+    },
+    "email_setup": {
+      "description": "Configure email settings to automatically send trip reports via ZIP attachment",
+      "library": "Uses Red Mail - a modern Python email library for simplified sending",
+      "steps": [
+        "1. Install Red Mail: pip install redmail",
+        "2. Set 'enabled' to true to enable email functionality",
+        "3. Update 'recipient_email' with your work email address",
+        "4. For Gmail: use your Gmail address as 'sender_email'",
+        "5. For Gmail: generate an App Password (not your regular password)",
+        "6. Update 'sender_password' with the App Password",
+        "7. For other providers: update smtp_server and smtp_port"
+      ],
+      "gmail_app_password_guide": "https://support.google.com/accounts/answer/185833",
+      "supported_providers": {
+        "Gmail": {
+          "smtp_server": "smtp.gmail.com",
+          "smtp_port": 587,
+          "note": "Requires App Password when 2FA is enabled"
+        },
+        "Outlook/Hotmail": {
+          "smtp_server": "smtp-mail.outlook.com",
+          "smtp_port": 587,
+          "note": "Use your Microsoft account credentials"
+        },
+        "Yahoo": {
+          "smtp_server": "smtp.mail.yahoo.com",
+          "smtp_port": 587,
+          "note": "May require app-specific password"
+        }
+      },
+      "features": [
+        "Automatic ZIP compression of monthly reports",
+        "HTML and plain text email formats",
+        "Customizable subject and body templates",
+        "Robust error handling and logging",
+        "Secure STARTTLS encryption"
+      ]
+    }
   }
 }
