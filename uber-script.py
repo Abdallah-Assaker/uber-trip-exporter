@@ -33,7 +33,7 @@ import shutil
 import sys
 import zipfile
 from calendar import monthrange
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Third-party imports
@@ -130,12 +130,12 @@ def get_month_date_range(month=None):
             target_year = current_date.year
         log(f"Using specified month: {target_month}/{target_year}", "INFO")
     
-    # Calculate start of month (00:00:00)
-    start_date = datetime(target_year, target_month, 1)
+    # Calculate start of month (00:00:00 UTC)
+    start_date = datetime(target_year, target_month, 1, tzinfo=timezone.utc)
     
-    # Calculate end of month (23:59:59.999)
+    # Calculate end of month (23:59:59.999 UTC)
     _, last_day = monthrange(target_year, target_month)
-    end_date = datetime(target_year, target_month, last_day, 23, 59, 59, 999000)
+    end_date = datetime(target_year, target_month, last_day, 23, 59, 59, 999000, tzinfo=timezone.utc)
     
     # Convert to milliseconds (Uber API expects milliseconds)
     start_timestamp_ms = int(start_date.timestamp() * 1000)
@@ -415,45 +415,82 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
 }
 """
 
-    # Variables for the activities query
-    variables = {
-        "endTimeMs": end_time_ms,
-        "startTimeMs": start_time_ms,
-        "limit": 60,
-        "includePast": True,
-        "includeUpcoming": False,
-        "orderTypes": ["RIDES", "TRAVEL"],
-        "profileType": "PERSONAL"
-    }
-
-    payload = {
-        "operationName": "Activities",
-        "query": activities_query,
-        "variables": variables,
-    }
-
+    # Fetch all trips with pagination
     log("Making API request to fetch trip list...", "INFO")
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
-    except requests.exceptions.Timeout:
-        log("Timeout while fetching trips from API", "ERROR")
-        return [], 0.0
-    except requests.exceptions.RequestException as e:
-        log(f"Network error while fetching trips: {e}", "ERROR")
-        return [], 0.0
-
-    if response.status_code != 200:
-        log(f"Failed to fetch trips: HTTP {response.status_code}", "ERROR")
-        return [], 0.0
-
-    data = response.json()
+    all_activities = []
+    next_page_token = None
+    page_count = 0
     
-    if not data or "data" not in data or not data["data"]:
-        log("No data returned from API", "ERROR")
-        return [], 0.0
+    while True:
+        page_count += 1
+        log(f"Fetching page {page_count} of trips...", "INFO")
         
-    activities_data = data["data"].get("activities", {}).get("past", {}).get("activities", [])
-    log(f"Found {len(activities_data)} trips in API response", "INFO")
+        # Variables for the activities query
+        variables = {
+            "endTimeMs": end_time_ms,
+            "startTimeMs": start_time_ms,
+            "limit": 200,  # Increased limit for fewer API calls
+            "includePast": True,
+            "includeUpcoming": False,
+            "orderTypes": ["RIDES", "TRAVEL"],
+            "profileType": "PERSONAL"
+        }
+        
+        # Add pagination token if available
+        if next_page_token:
+            variables["nextPageToken"] = next_page_token
+
+        payload = {
+            "operationName": "Activities",
+            "query": activities_query,
+            "variables": variables,
+        }
+
+        try:
+            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+        except requests.exceptions.Timeout:
+            log("Timeout while fetching trips from API", "ERROR")
+            return [], 0.0
+        except requests.exceptions.RequestException as e:
+            log(f"Network error while fetching trips: {e}", "ERROR")
+            return [], 0.0
+
+        if response.status_code != 200:
+            log(f"Failed to fetch trips: HTTP {response.status_code}", "ERROR")
+            return [], 0.0
+
+        data = response.json()
+        
+        if not data or "data" not in data or not data["data"]:
+            log("No data returned from API", "ERROR")
+            break
+            
+        past_data = data["data"].get("activities", {}).get("past", {})
+        page_activities = past_data.get("activities", [])
+        next_page_token = past_data.get("nextPageToken")
+        
+        if not page_activities:
+            log("No more trips found", "INFO")
+            break
+            
+        all_activities.extend(page_activities)
+        log(f"Found {len(page_activities)} trips on page {page_count} (total: {len(all_activities)})", "INFO")
+        
+        # Break if no more pages
+        if not next_page_token:
+            log("No more pages available", "INFO")
+            break
+            
+        # Add delay between API calls to avoid rate limiting
+        time.sleep(1)
+        
+        # Safety limit to avoid infinite loops
+        if page_count >= 10:
+            log("Reached maximum page limit (10), stopping pagination", "WARNING")
+            break
+    
+    activities_data = all_activities
+    log(f"Total trips fetched: {len(activities_data)}", "SUCCESS")
 
     trips = []
     overall_amount = 0.0

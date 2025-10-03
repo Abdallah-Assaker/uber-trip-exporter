@@ -8,15 +8,17 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 ## 🚀 Features
 
 - **✨ External Configuration**: Uses JSON config files for easy customization without code editing
-- **🔍 Automated Data Extraction**: Fetches trip data from Uber's GraphQL API
+- **🔍 Automated Data Extraction**: Fetches trip data from Uber's GraphQL API with proper timezone handling
 - **🏠 Smart Address Matching**: Uses configurable keywords to classify trips as "To Work" or "From Work"
 - **📄 Receipt Management**: Downloads and merges all trip receipts into a single PDF
 - **📊 Excel Integration**: Automatically fills out company expense claim forms
 - **📁 Month-Specific Organization**: Creates organized folders for each month's data
-- **📧 Email Automation**: Automatically compresses and emails monthly reports (NEW!)
+- **📧 Email Automation**: Automatically compresses and emails monthly reports
 - **🔐 Secure Token Management**: Uses external token file for easy monthly updates
 - **🎛️ Command Line Parameters**: Accepts month parameter for flexible data extraction
 - **📝 Enhanced Logging**: Colored console output with progress indicators and timestamps
+- **🌍 UTC Timezone Support**: Proper timezone handling to ensure no trips are missed
+- **📄 API Pagination**: Fetches all trips using pagination to handle large datasets
 - **🤝 Easy Sharing**: Share with colleagues without exposing your credentials
 
 ## 📋 Prerequisites
@@ -306,9 +308,9 @@ uber-script.py
 - ✅ `pandas` - Excel data manipulation
 - ✅ `openpyxl` - Excel file handling
 - ✅ `PyPDF2` - PDF merging
-- ✅ `redmail` - Modern email sending (NEW!)
+- ✅ `redmail` - Modern email sending
 
-## 🐛 Troubleshooting
+## � Troubleshooting
 
 ### Authentication Errors
 - Get a fresh cookie from your browser
@@ -372,6 +374,12 @@ The script now provides **detailed colored console output** to help with trouble
 - Check if the month logic is correct (December uses previous year)
 - Ensure your date range covers the intended period
 - Console shows exact date range being queried
+- **Fixed in v2.1**: Timezone issues that caused missing trips have been resolved
+
+### Missing Trips (Especially Early in Month)
+- **This issue has been FIXED in v2.1** with proper UTC timezone handling
+- If using an older version, update to get complete trip data
+- The script now uses pagination to fetch all trips, not just the first 60
 
 ### Missing Receipts
 - Check internet connection
