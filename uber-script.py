@@ -581,12 +581,6 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
             # Get receipt HTML for fare breakdown parsing
             receipt_html = get_receipt_html(uuid, timestamp, headers)
             if receipt_html:
-                # Save HTML for first few trips for debugging
-                if i < 3:
-                    with open(f"debug_receipt_{uuid}.html", "w", encoding="utf-8") as f:
-                        f.write(receipt_html)
-                    log(f"Saved receipt HTML for debugging: debug_receipt_{uuid}.html", "INFO")
-                
                 # Parse fare breakdown from receipt HTML
                 fare_breakdown = parse_fare_breakdown(receipt_html, config or {}, uuid)
             
