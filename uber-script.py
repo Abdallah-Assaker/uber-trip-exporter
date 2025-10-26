@@ -202,10 +202,18 @@ def read_token_from_file(file_path="token.txt"):
         log(f"Error reading token file: {e}", "ERROR")
         exit(1)
 
-def read_config_from_file(file_path="config.json"):
+def read_config_from_file(file_path="config.json", return_full_config=False):
     """
     Read address keywords and email configuration from a JSON file.
     If the file doesn't exist, create it with default values.
+    
+    Args:
+        file_path (str): Path to the config file
+        return_full_config (bool): If True, return the full config dict instead of individual components
+    
+    Returns:
+        tuple: (home_keywords, work_keywords, email_config) if return_full_config=False
+        dict: Full config if return_full_config=True
     """
     log(f"Loading configuration from {file_path}", "INFO")
     
@@ -233,8 +241,11 @@ def read_config_from_file(file_path="config.json"):
             log(f"Email functionality: {'enabled' if email_enabled else 'disabled'}", "INFO")
         else:
             log("Email configuration not found - email functionality disabled", "WARNING")
-            
-        return config['home_address_keywords'], config['work_address_keywords'], email_config
+        
+        if return_full_config:
+            return config
+        else:
+            return config['home_address_keywords'], config['work_address_keywords'], email_config
         
     except FileNotFoundError:
         log(f"Config file {file_path} not found. Creating default config...", "WARNING")
@@ -319,7 +330,7 @@ def read_config_from_file(file_path="config.json"):
 # API FUNCTIONS
 # ============================================================================
 
-def get_uber_trips(cookie, start_time_ms, end_time_ms, download_receipts=True):
+def get_uber_trips(cookie, start_time_ms, end_time_ms, config=None, download_receipts=True, debug_limit=None):
     """
     Fetch Uber trips from GraphQL API for the specified time range.
     
@@ -327,6 +338,8 @@ def get_uber_trips(cookie, start_time_ms, end_time_ms, download_receipts=True):
         cookie (str): Authentication cookie
         start_time_ms (int): Start timestamp in milliseconds
         end_time_ms (int): End timestamp in milliseconds
+        config (dict): Configuration for fare breakdown
+        download_receipts (bool): Whether to download receipt PDFs
     
     Returns:
         tuple: (trips, overall_amount)
@@ -498,6 +511,10 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
     for i, trip in enumerate(activities_data):
         log_progress(i + 1, len(activities_data), "Processing trips")
         
+        # Debug limit for testing
+        if debug_limit and i >= debug_limit:
+            break
+            
         uuid = trip["uuid"]
         trip_url = trip["cardURL"]
         desc = trip.get("description", "")   
@@ -554,17 +571,33 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
         else:
             log(f"Failed to fetch trip details for {uuid}", "WARNING")
 
-        # Get receipt timestamp and download PDF (if enabled)
-        if download_receipts:
-            timestamp = get_receipt_timestamp(uuid, headers)
-            if timestamp:
+        # Get receipt data for fare breakdown
+        receipt_html = None
+        fare_breakdown = None
+        
+        # Get receipt timestamp and data
+        timestamp = get_receipt_timestamp(uuid, headers)
+        if timestamp:
+            # Get receipt HTML for fare breakdown parsing
+            receipt_html = get_receipt_html(uuid, timestamp, headers)
+            if receipt_html:
+                # Save HTML for first few trips for debugging
+                if i < 3:
+                    with open(f"debug_receipt_{uuid}.html", "w", encoding="utf-8") as f:
+                        f.write(receipt_html)
+                    log(f"Saved receipt HTML for debugging: debug_receipt_{uuid}.html", "INFO")
+                
+                # Parse fare breakdown from receipt HTML
+                fare_breakdown = parse_fare_breakdown(receipt_html, config or {}, uuid)
+            
+            # Download PDF if enabled
+            if download_receipts:
                 download_receipt_pdf(uuid, timestamp, headers)
-            else:
-                log(f"No receipt timestamp found for trip {uuid}", "WARNING")
         else:
-            log(f"Skipping receipt download for trip {uuid} (receipts disabled)", "INFO")
+            log(f"No receipt timestamp found for trip {uuid}", "WARNING")
 
-        trips.append({
+        # Prepare trip data with fare breakdown
+        trip_data = {
             "uuid": uuid,
             "url": trip_url,
             "status": status,
@@ -572,7 +605,20 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
             "time": subtitle,
             "pickup_location": pickup_address,
             "dropoff_location": dropoff_address,
-        })
+        }
+        
+        # Add fare breakdown data if available
+        if fare_breakdown:
+            trip_data["fare_breakdown"] = fare_breakdown
+            trip_data["subtracted_fees_total"] = fare_breakdown.get("subtracted_fees_total", 0.0)
+            trip_data["original_price"] = price - fare_breakdown.get("subtracted_fees_total", 0.0)
+            trip_data["subtracted_fees"] = fare_breakdown.get("subtracted_fees", [])
+        else:
+            trip_data["subtracted_fees_total"] = 0.0
+            trip_data["original_price"] = price
+            trip_data["subtracted_fees"] = []
+
+        trips.append(trip_data)
         
         # Add delay between API calls to avoid rate limiting
         time.sleep(0.5)
@@ -581,6 +627,90 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
     log(f"Total amount: ${overall_amount:.2f}", "INFO")
     
     return trips, overall_amount
+
+def parse_fare_breakdown(receipt_html, config, uuid):
+    """
+    Parse fare breakdown from receipt HTML to separate base fare from additional fees.
+    
+    Args:
+        receipt_html (str): HTML content of the receipt
+        config (dict): Configuration with fare breakdown settings
+        uuid (str): Trip UUID for logging
+    
+    Returns:
+        dict: {
+            'original_price': float,
+            'subtracted_fees': float,
+            'fee_details': list,
+            'notes': str
+        }
+    """
+    if not config.get('fare_breakdown', {}).get('enabled', False):
+        return None
+    
+    subtractable_types = config.get('fare_breakdown', {}).get('subtractable_fee_types', [])
+    
+    # Extract fare breakdown lines from HTML using Uber's specific structure
+    # Look for fare line items with data-testid attributes
+    
+    # Pattern that works with the actual HTML structure
+    fare_item_pattern = r'data-testid="fare_line_item_label_([^"]*)"[^>]*>([^<]+)<.*?data-testid="fare_line_item_amount_[^"]*"[^>]*>([^<]+)</td>'
+    
+    matches = re.findall(fare_item_pattern, receipt_html, re.IGNORECASE | re.DOTALL)
+    
+    # Convert matches to description, amount format
+    fare_matches = []
+    for testid, description, amount_text in matches:
+        desc_clean = description.strip()
+        
+        # Extract numeric value from amount text (handling Unicode and currency symbols)
+        # Find the first sequence of digits and decimal point
+        amount_match = re.search(r'(\d+(?:\.\d{2})?)', amount_text)
+        if not amount_match:
+            log(f"Trip {uuid}: No numeric value found in '{amount_text}'", "WARNING")
+            continue
+        amount_clean = amount_match.group(1)
+        
+        try:
+            amount_float = float(amount_clean)
+            fare_matches.append((desc_clean, amount_float))
+        except ValueError:
+            log(f"Trip {uuid}: Could not parse amount '{amount_text}' -> '{amount_clean}'", "WARNING")
+            continue
+    
+    log(f"Trip {uuid}: Found {len(fare_matches)} fare line items: {fare_matches}", "INFO")
+    
+    fee_details = []
+    subtracted_total = 0.0
+    
+    for description, amount in fare_matches:
+        # Check if this fee type should be subtracted
+        should_subtract = any(fee_type.lower() in description.lower() for fee_type in subtractable_types)
+        
+        if should_subtract:
+            fee_details.append({
+                'description': description,
+                'amount': amount,
+                'subtracted': True
+            })
+            subtracted_total += amount
+            log(f"Trip {uuid}: Found subtractable fee - {description}: ${amount}", "INFO")
+        else:
+            # Keep track of non-subtractable fees for debugging
+            fee_details.append({
+                'description': description,
+                'amount': amount,
+                'subtracted': False
+            })
+    
+    # Generate notes for Excel - return subtracted fees list for later formatting
+    subtracted_fees = [fee for fee in fee_details if fee['subtracted']]
+    
+    return {
+        'subtracted_fees_total': subtracted_total,
+        'fee_details': fee_details,
+        'subtracted_fees': subtracted_fees  # Return list for Excel formatting
+    }
 
 # ============================================================================
 # PDF AND RECEIPT FUNCTIONS
@@ -712,14 +842,28 @@ def process_excel_file(excel_file, trips, template_excel_file, home_keywords, wo
         # Classify trip reason for Excel column
         trip_reason_excel = classify_trip_reason(trip["pickup_location"], home_keywords, work_keywords)
 
+        # Use original price if fare breakdown is available, otherwise use total price
+        trip_price = trip.get("original_price", trip["price"])
+        
+        # Generate fare notes in format: Total [TotalTrip] / Subtracted (amount) [Reason]
+        fare_notes = ""
+        subtracted_fees = trip.get("subtracted_fees", [])
+        if subtracted_fees:
+            total_price = trip["price"]
+            subtracted_amount = trip.get("subtracted_fees_total", 0.0)
+            # Get fee descriptions in English
+            fee_descriptions = [fee['description'] for fee in subtracted_fees]
+            fee_reason = ', '.join(fee_descriptions)
+            fare_notes = f"Total {total_price:.2f} / Subtracted ({subtracted_amount:.2f}) {fee_reason}"
+
         row = start_row + i
         ws.cell(row=row, column=2, value=trip_date)  # Column B = Date
         ws.cell(row=row, column=3, value=trip["pickup_location"])
         ws.cell(row=row, column=4, value=trip["dropoff_location"])
-        ws.cell(row=row, column=5, value=trip["price"])
+        ws.cell(row=row, column=5, value=trip_price)  # Use original price (excluding fees)
         ws.cell(row=row, column=6, value=trip_reason_excel)
         ws.cell(row=row, column=7, value="App Wallet")
-        ws.cell(row=row, column=8, value="")
+        ws.cell(row=row, column=8, value=fare_notes)  # Add fare notes
 
         # Format the date column as dd/mm/yyyy
         ws.cell(row=row, column=2).number_format = "dd/mm/yyyy"
@@ -777,6 +921,58 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
                 return jobs[0]["timestamp"]
     else:
         log(f"Request failed for {uuid}: {receipt_resp.status_code}", "ERROR")
+    return None
+
+def get_receipt_html(uuid, timestamp, headers):
+    """Get the receipt HTML data for fare breakdown parsing."""
+    url = UBER_GRAPHQL_URL
+    
+    receipt_query = """
+query GetReceipt($tripUUID: String!, $timestamp: String) {
+  getReceipt(tripUUID: $tripUUID, timestamp: $timestamp) {
+    receiptsForJob {
+      timestamp
+      type
+    }
+    receiptData
+  }
+}
+"""
+    
+    receipt_payload = {
+        "operationName": "GetReceipt",
+        "query": receipt_query,
+        "variables": {"tripUUID": uuid, "timestamp": timestamp},
+    }
+    
+    try:
+        receipt_resp = requests.post(url, headers=headers, data=json.dumps(receipt_payload), timeout=15)
+    except requests.exceptions.Timeout:
+        log(f"Timeout getting receipt HTML for {uuid}", "WARNING")
+        return None
+    except requests.exceptions.RequestException as e:
+        log(f"Network error getting receipt HTML for {uuid}: {e}", "WARNING")
+        return None
+        
+    if receipt_resp.status_code == 200:
+        receipt_data = receipt_resp.json()
+
+        # Defensive checks
+        if not receipt_data or "data" not in receipt_data or not receipt_data["data"]:
+            log(f"No receipt data returned for {uuid}", "WARNING")
+            return None
+
+        receipt_info = receipt_data["data"].get("getReceipt")
+        if receipt_info:
+            receipt_html = receipt_info.get("receiptData")
+            if receipt_html:
+                return receipt_html
+            else:
+                log(f"No receipt HTML data for trip {uuid}", "WARNING")
+        else:
+            log(f"No receipt info for trip {uuid}", "WARNING")
+    else:
+        log(f"Receipt HTML request failed for {uuid}: {receipt_resp.status_code}", "ERROR")
     return None
 
 def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
@@ -1017,8 +1213,13 @@ def main():
     # Read authentication token
     cookie = read_token_from_file()
     
+    # Load configuration for fare breakdown
+    log("Loading configuration from config.json", "INFO")
+    home_address_keywords, work_address_keywords, email_config = read_config_from_file()
+    config = read_config_from_file(return_full_config=True)
+    
     # Fetch trips from Uber API (with receipts using improved timeout handling)
-    trips, overall_amount = get_uber_trips(cookie, start_time_ms, end_time_ms, download_receipts=True)
+    trips, overall_amount = get_uber_trips(cookie, start_time_ms, end_time_ms, config, download_receipts=True)
     
     if not trips:
         log("No trips found for the specified period", "WARNING")
@@ -1033,11 +1234,16 @@ def main():
     monthly_receipts_file = os.path.join(output_folder, "all_receipts.pdf")
     monthly_trips_file = os.path.join(output_folder, "trips.json")
 
+    # Calculate total subtracted fees for review
+    total_subtracted_fees = sum(trip.get("subtracted_fees_total", 0.0) for trip in trips)
+    
     # Save trips data with month prefix
     log("Saving trip data to JSON file", "INFO")
     with open(monthly_trips_file, "w", encoding="utf-8") as f:
         json.dump({
             "overall_amount": round(overall_amount, 2),
+            "total_subtracted_fees": round(total_subtracted_fees, 2),  # For reviewing
+            "reimbursable_amount": round(overall_amount - total_subtracted_fees, 2),  # What company pays
             "trips": trips,
             "month_year": month_year,
             "date_range": {
@@ -1053,10 +1259,6 @@ def main():
     
     # Clean up temporary receipts folder
     cleanup_temp_receipts_folder()
-
-    # Load address keywords from config file
-    log("Loading address configuration", "INFO")
-    home_address_keywords, work_address_keywords, email_config = read_config_from_file()
 
     # Load the Excel template (original file name)
     template_excel_file = "Private_Taxi_Claim_Form.xlsx"
