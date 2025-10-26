@@ -596,6 +596,25 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
         else:
             log(f"No receipt timestamp found for trip {uuid}", "WARNING")
 
+        # Check if trip is a valid work commute (home ↔ work only)
+        pickup_lower = pickup_address.lower()
+        dropoff_lower = dropoff_address.lower()
+        
+        # Check for home keywords in pickup/dropoff
+        is_pickup_home = any(keyword.lower() in pickup_lower for keyword in config.get('home_address_keywords', []))
+        is_dropoff_home = any(keyword.lower() in dropoff_lower for keyword in config.get('home_address_keywords', []))
+        
+        # Check for work keywords in pickup/dropoff
+        is_pickup_work = any(keyword.lower() in pickup_lower for keyword in config.get('work_address_keywords', []))
+        is_dropoff_work = any(keyword.lower() in dropoff_lower for keyword in config.get('work_address_keywords', []))
+        
+        # Only include trips that are: (home→work) OR (work→home)
+        is_valid_work_trip = (is_pickup_home and is_dropoff_work) or (is_pickup_work and is_dropoff_home)
+        
+        if not is_valid_work_trip:
+            log(f"Skipping non-work trip: {uuid} (not a home↔work commute)", "WARNING")
+            continue
+        
         # Prepare trip data with fare breakdown
         trip_data = {
             "uuid": uuid,
