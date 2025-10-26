@@ -20,6 +20,8 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 - **🌍 UTC Timezone Support**: Proper timezone handling to ensure no trips are missed
 - **📄 API Pagination**: Fetches all trips using pagination to handle large datasets
 - **🤝 Easy Sharing**: Share with colleagues without exposing your credentials
+- **💰 Fare Breakdown**: Configurable fee separation (UberX Priority, Waiting Time) with Excel notes
+- **🚗 Smart Trip Filtering**: Automatically excludes non-work trips (only includes home↔work commutes)
 
 ## 📋 Prerequisites
 
@@ -86,6 +88,19 @@ The config file format:
     "YOUR_WORK_LANDMARK",
     "YOUR_WORK_AREA"
   ],
+  "fare_breakdown": {
+    "enabled": true,
+    "description": "Configure fare breakdown to separate base fares from additional fees",
+    "subtractable_fee_types": [
+      "UberX Priority",
+      "أولوية UberX"
+    ],
+    "notes": [
+      "Only fees in 'subtractable_fee_types' will be separated from base fare",
+      "Discounts and promotional offers will remain included in the reimbursable amount",
+      "Set 'enabled' to false to disable fare breakdown and use total trip cost"
+    ]
+  },
   "email_config": {
     "enabled": false,
     "recipient_email": "your-work-email@company.com",
@@ -128,6 +143,41 @@ The config file format:
 - ❌ Avoid full addresses that may vary
 - ❌ Don't use building numbers that might change (e.g., 223 vs 224)
 - 🔍 Test by checking actual addresses in the generated `trips.json` file
+
+**Important:** The script automatically filters trips to only include **home↔work commutes**. Only trips that go from home to work OR from work to home will be included in the final report. Personal trips (e.g., work to non-home locations) are automatically excluded.
+
+#### Fare Breakdown Configuration (New Feature)
+
+The script can now separate additional fees (like UberX Priority) from base trip fares for more accurate reimbursement reporting.
+
+**Configuration in `config.json`:**
+```json
+{
+  "fare_breakdown": {
+    "enabled": true,
+    "subtractable_fee_types": [
+      "UberX Priority",
+      "أولوية UberX"
+    ]
+  }
+}
+```
+
+**How it works:**
+- ✅ **Parses receipt HTML** to extract individual fare line items
+- ✅ **Identifies subtractable fees** matching your configured types
+- ✅ **Adds Excel notes** to affected trips (e.g., "Total $237.00 / Subtracted ($29.43) أولوية UberX")
+- ✅ **Tracks total** of all subtracted fees in `trips.json`
+- ✅ **Keeps base fare** for company reimbursement
+- ❌ **Never subtracts discounts/promotions** - those stay included in reimbursable amount
+
+**Benefits:**
+- 💰 Separate personal fees (Priority, Waiting Time) from company-reimbursable base fare
+- 📝 Clear documentation in Excel with notes explaining adjustments
+- 🔧 Fully configurable - add/remove fee types as needed
+- 🌍 Supports Arabic and English fee descriptions
+
+**To disable:** Set `"enabled": false` in the fare_breakdown section.
 
 #### Email Configuration (Optional)
 
