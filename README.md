@@ -22,6 +22,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 - **🤝 Easy Sharing**: Share with colleagues without exposing your credentials
 - **💰 Fare Breakdown**: Configurable fee separation (UberX Priority, Waiting Time) with Excel notes
 - **🚗 Smart Trip Filtering**: Automatically excludes non-work trips (only includes home↔work commutes)
+- **💳 Payment Method Detection**: Automatically detects payment method (Cash, Visa, App Wallet) from receipts
 
 ## 📋 Prerequisites
 
