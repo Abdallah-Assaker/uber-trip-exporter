@@ -571,18 +571,21 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
         else:
             log(f"Failed to fetch trip details for {uuid}", "WARNING")
 
-        # Get receipt data for fare breakdown
+        # Get receipt data for fare breakdown and payment method
         receipt_html = None
         fare_breakdown = None
+        payment_method = "App Wallet"  # Default
         
         # Get receipt timestamp and data
         timestamp = get_receipt_timestamp(uuid, headers)
         if timestamp:
-            # Get receipt HTML for fare breakdown parsing
+            # Get receipt HTML for fare breakdown and payment method parsing
             receipt_html = get_receipt_html(uuid, timestamp, headers)
             if receipt_html:
                 # Parse fare breakdown from receipt HTML
                 fare_breakdown = parse_fare_breakdown(receipt_html, config or {}, uuid)
+                # Parse payment method from receipt HTML
+                payment_method = parse_payment_method(receipt_html, uuid)
             
             # Download PDF if enabled
             if download_receipts:
@@ -609,7 +612,7 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
             log(f"Skipping non-work trip: {uuid} (not a home↔work commute)", "WARNING")
             continue
         
-        # Prepare trip data with fare breakdown
+        # Prepare trip data with fare breakdown and payment method
         trip_data = {
             "uuid": uuid,
             "url": trip_url,
@@ -618,6 +621,7 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
             "time": subtitle,
             "pickup_location": pickup_address,
             "dropoff_location": dropoff_address,
+            "payment_method": payment_method,
         }
         
         # Add fare breakdown data if available
@@ -724,6 +728,42 @@ def parse_fare_breakdown(receipt_html, config, uuid):
         'fee_details': fee_details,
         'subtracted_fees': subtracted_fees  # Return list for Excel formatting
     }
+
+def parse_payment_method(receipt_html, uuid):
+    """
+    Parse payment method from receipt HTML.
+    
+    Args:
+        receipt_html (str): HTML content of the receipt
+        uuid (str): Trip UUID for logging
+    
+    Returns:
+        str: Payment method ('Cash', 'App Wallet', or 'Visa')
+    """
+    if not receipt_html:
+        return "App Wallet"  # Default
+    
+    # Pattern to find payment method in the HTML
+    # Look for text patterns like:
+    # >Cash</td>
+    # >Uber Cash</td>
+    # >Name ••••1234</td> (credit card)
+    
+    # Check for Cash payment
+    if re.search(r'>Cash</td>', receipt_html, re.IGNORECASE):
+        return "Cash"
+    
+    # Check for Uber Cash / Wallet
+    if re.search(r'>Uber\s+Cash</td>', receipt_html, re.IGNORECASE):
+        return "App Wallet"
+    
+    # Check for credit card pattern (name followed by •••• and 4 digits)
+    # Pattern: >Any Name ••••1234</td>
+    if re.search(r'>[^<]*\s+••••\d{4}</td>', receipt_html):
+        return "Visa"
+    
+    # Default to App Wallet if no specific payment method found
+    return "App Wallet"
 
 # ============================================================================
 # PDF AND RECEIPT FUNCTIONS
@@ -875,7 +915,7 @@ def process_excel_file(excel_file, trips, template_excel_file, home_keywords, wo
         ws.cell(row=row, column=4, value=trip["dropoff_location"])
         ws.cell(row=row, column=5, value=trip_price)  # Use original price (excluding fees)
         ws.cell(row=row, column=6, value=trip_reason_excel)
-        ws.cell(row=row, column=7, value="App Wallet")
+        ws.cell(row=row, column=7, value=trip.get("payment_method", "App Wallet"))  # Use actual payment method
         ws.cell(row=row, column=8, value=fare_notes)  # Add fare notes
 
         # Format the date column as dd/mm/yyyy
