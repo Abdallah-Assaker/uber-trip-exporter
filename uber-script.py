@@ -41,7 +41,13 @@ import pandas as pd
 import requests
 import time
 from openpyxl import load_workbook
-from PyPDF2 import PdfMerger
+from PyPDF2 import PdfMerger, PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib.utils import ImageReader
+from io import BytesIO
+from PIL import Image
+import fitz  # PyMuPDF
 
 try:
     from redmail import EmailSender
@@ -1029,11 +1035,9 @@ query GetReceipt($tripUUID: String!, $timestamp: String) {
     return None
 
 def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
-    """Merge all trip receipt PDFs into a single file."""
+    """Merge all trip receipt PDFs into a single file, combining two-page receipts into landscape pages."""
     log(f"Merging {len(trips)} receipts into {output_file}", "INFO")
     
-    merger = PdfMerger()
-
     # Sort trips by time desc
     sorted_trips = sorted(
         trips,
@@ -1041,20 +1045,82 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
         reverse=True
     )
 
+    writer = PdfWriter()
     merged_count = 0
+    
     for trip in sorted_trips:
         pdf_file = os.path.join(folder, f"{trip['uuid']}.pdf")
         if os.path.exists(pdf_file):
-            merger.append(pdf_file)
-            log(f"Added receipt for {trip['time']}", "INFO")
-            merged_count += 1
+            try:
+                # Open PDF with PyMuPDF for better rendering
+                doc = fitz.open(pdf_file)
+                num_pages = len(doc)
+                
+                if num_pages == 2:
+                    # New format: Two pages - combine them side-by-side in landscape
+                    log(f"Processing two-page receipt for {trip['time']}", "INFO")
+                    
+                    # Get dimensions of the first page
+                    page1 = doc[0]
+                    page2 = doc[1]
+                    
+                    # Create a new PDF page in landscape with double width
+                    # Standard page height, double width to fit both pages
+                    page_height = page1.rect.height
+                    page_width = page1.rect.width
+                    
+                    # Create new landscape page (width = 2x original width)
+                    landscape_width = page_width * 2
+                    landscape_height = page_height
+                    
+                    # Create a new PDF document with combined page
+                    combined_doc = fitz.open()
+                    combined_page = combined_doc.new_page(width=landscape_width, height=landscape_height)
+                    
+                    # Render first page to the left half
+                    pix1 = page1.get_pixmap(matrix=fitz.Matrix(1, 1))
+                    img_rect1 = fitz.Rect(0, 0, page_width, page_height)
+                    combined_page.insert_image(img_rect1, pixmap=pix1)
+                    
+                    # Render second page to the right half
+                    pix2 = page2.get_pixmap(matrix=fitz.Matrix(1, 1))
+                    img_rect2 = fitz.Rect(page_width, 0, landscape_width, page_height)
+                    combined_page.insert_image(img_rect2, pixmap=pix2)
+                    
+                    # Convert to bytes and add to writer
+                    combined_bytes = combined_doc.tobytes()
+                    combined_reader = PdfReader(BytesIO(combined_bytes))
+                    writer.add_page(combined_reader.pages[0])
+                    
+                    combined_doc.close()
+                    log(f"Added combined landscape receipt for {trip['time']}", "INFO")
+                    
+                elif num_pages == 1:
+                    # Old format: Single page - keep as is
+                    log(f"Processing single-page receipt for {trip['time']}", "INFO")
+                    reader = PdfReader(pdf_file)
+                    writer.add_page(reader.pages[0])
+                    log(f"Added receipt for {trip['time']}", "INFO")
+                    
+                else:
+                    # Unexpected format - add all pages
+                    log(f"Receipt has {num_pages} pages for {trip['time']}, adding all", "WARNING")
+                    reader = PdfReader(pdf_file)
+                    for page in reader.pages:
+                        writer.add_page(page)
+                    log(f"Added {num_pages}-page receipt for {trip['time']}", "INFO")
+                
+                doc.close()
+                merged_count += 1
+                
+            except Exception as e:
+                log(f"Error processing receipt {trip['uuid']}: {e}", "ERROR")
         else:
             log(f"Missing PDF for {trip['uuid']} ({trip['time']})", "WARNING")
 
     if merged_count > 0:
         with open(output_file, "wb") as f:
-            merger.write(f)
-        merger.close()
+            writer.write(f)
         log(f"Successfully merged {merged_count} receipts into {output_file}", "SUCCESS")
     else:
         log("No trips available to merge", "WARNING")

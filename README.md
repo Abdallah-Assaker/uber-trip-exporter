@@ -23,6 +23,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 - **💰 Fare Breakdown**: Configurable fee separation (UberX Priority, Waiting Time) with Excel notes
 - **🚗 Smart Trip Filtering**: Automatically excludes non-work trips (only includes home↔work commutes)
 - **💳 Payment Method Detection**: Automatically detects payment method (Cash, Visa, App Wallet) from receipts
+- **📄 Two-Page Receipt Support**: Automatically combines new two-page receipts into landscape format for consolidated PDF
 
 ## 📋 Prerequisites
 
@@ -40,7 +41,7 @@ A Python automation script that extracts Uber trip data and generates monthly tr
 
 2. **Install dependencies**
    ```bash
-   pip install requests pandas openpyxl PyPDF2 redmail
+   pip install requests pandas openpyxl PyPDF2 redmail PyMuPDF Pillow reportlab
    ```
 
 ## 🔧 Setup
@@ -264,6 +265,8 @@ python uber-script.py 1     # Fetch January data (current year)
 4. 📄 **Receipt Download**: Downloads receipt PDFs with individual status updates
 5. 📊 **Excel Processing**: Creates monthly Excel claim form with progress indicators
 6. 📑 **PDF Merging**: Merges all receipts into `all_receipts.pdf` with detailed logging
+   - **New**: Automatically detects two-page receipts and combines them side-by-side in landscape format
+   - **Legacy Support**: Single-page receipts remain unchanged for backward compatibility
 7. 💾 **Data Saving**: Saves trip data to `trips.json` with confirmation
 8. 📦 **ZIP Compression**: Compresses monthly folder for easy sharing (if email enabled)
 9. 📧 **Email Delivery**: Sends professional email with ZIP attachment (if configured)
@@ -358,10 +361,13 @@ uber-script.py
 - ✅ `requests` - API calls
 - ✅ `pandas` - Excel data manipulation
 - ✅ `openpyxl` - Excel file handling
-- ✅ `PyPDF2` - PDF merging
+- ✅ `PyPDF2` - PDF merging and manipulation
+- ✅ `PyMuPDF` - Advanced PDF rendering for two-page receipts
+- ✅ `Pillow` - Image processing for receipt combination
+- ✅ `reportlab` - PDF generation support
 - ✅ `redmail` - Modern email sending
 
-## � Troubleshooting
+## 🔧 Troubleshooting
 
 ### Authentication Errors
 - Get a fresh cookie from your browser
@@ -437,6 +443,8 @@ The script now provides **detailed colored console output** to help with trouble
 - Verify trips exist in your Uber account
 - Some older trips may not have downloadable receipts
 - Temporary receipts folder is automatically cleaned up after processing
+- **New Receipt Format**: The script automatically handles both old (single-page) and new (two-page) receipt formats
+- Two-page receipts are combined side-by-side in landscape orientation in the merged PDF
 
 ### Excel Errors
 - Ensure the Excel template is in the same directory
