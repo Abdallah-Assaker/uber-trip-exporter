@@ -1048,6 +1048,11 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
     writer = PdfWriter()
     merged_count = 0
     
+    # IMPORTANT: Keep all PdfReader objects alive until after writer.write()
+    # PyPDF2's PdfWriter maintains references to pages, not copies.
+    # If readers are garbage collected before write(), data becomes corrupted.
+    readers_to_keep_alive = []
+    
     for trip in sorted_trips:
         pdf_file = os.path.join(folder, f"{trip['uuid']}.pdf")
         if os.path.exists(pdf_file):
@@ -1089,8 +1094,11 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
                     
                     # Convert to bytes and add to writer
                     combined_bytes = combined_doc.tobytes()
-                    combined_reader = PdfReader(BytesIO(combined_bytes))
+                    # Create BytesIO and reader, keep both alive
+                    pdf_buffer = BytesIO(combined_bytes)
+                    combined_reader = PdfReader(pdf_buffer)
                     writer.add_page(combined_reader.pages[0])
+                    readers_to_keep_alive.append((pdf_buffer, combined_reader))
                     
                     combined_doc.close()
                     log(f"Added combined landscape receipt for {trip['time']}", "INFO")
@@ -1100,6 +1108,7 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
                     log(f"Processing single-page receipt for {trip['time']}", "INFO")
                     reader = PdfReader(pdf_file)
                     writer.add_page(reader.pages[0])
+                    readers_to_keep_alive.append(reader)
                     log(f"Added receipt for {trip['time']}", "INFO")
                     
                 else:
@@ -1108,6 +1117,7 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
                     reader = PdfReader(pdf_file)
                     for page in reader.pages:
                         writer.add_page(page)
+                    readers_to_keep_alive.append(reader)
                     log(f"Added {num_pages}-page receipt for {trip['time']}", "INFO")
                 
                 doc.close()
@@ -1124,13 +1134,18 @@ def merge_receipts(trips, folder="receipts", output_file="all_receipts.pdf"):
         log(f"Successfully merged {merged_count} receipts into {output_file}", "SUCCESS")
     else:
         log("No trips available to merge", "WARNING")
+    
+    # Clear readers after write is complete
+    readers_to_keep_alive.clear()
 
 
 def parse_trip_date(date_str: str):
     """Convert Uber's subtitle string into datetime (adjust format if needed)."""
     try:
         # Primary format: "Aug 31 • 4:29 PM"
-        date_clean = date_str.replace("•", "").strip()
+        # Remove bullet and normalize multiple spaces to single space
+        date_clean = date_str.replace("•", " ").strip()
+        date_clean = re.sub(r'\s+', ' ', date_clean)  # Normalize whitespace
         trip_dt = datetime.strptime(date_clean, "%b %d %I:%M %p")
         trip_dt = trip_dt.replace(year=datetime.now().year)
         return trip_dt
