@@ -130,7 +130,9 @@ def get_month_date_range(month=None):
             raise ValueError("Month must be between 1 and 12")
         
         target_month = month
-        if month == 12:
+        # If the requested month is in the future, use previous year
+        # Otherwise use current year
+        if month > current_date.month:
             target_year = current_date.year - 1
         else:
             target_year = current_date.year

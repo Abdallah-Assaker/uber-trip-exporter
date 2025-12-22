@@ -243,14 +243,14 @@ python uber-script.py [month]
 **Examples:**
 ```bash
 python uber-script.py 7     # Fetch July data
-python uber-script.py 12    # Fetch December data (previous year)  
-python uber-script.py 1     # Fetch January data (current year)
+python uber-script.py 12    # Fetch December data
+python uber-script.py 1     # Fetch January data
 ```
 
 **Month Logic:**
 - **No parameter**: Fetches previous month's data
-- **Month 1-11**: Uses current year
-- **Month 12 (December)**: Uses previous year (for year-end reporting)
+- **Month <= current month**: Uses current year
+- **Month > current month**: Uses previous year (e.g., requesting October in March fetches October of last year)
 
 ### Console Output Features
 - 🎨 **Colored logging**: Different colors for INFO, SUCCESS, WARNING, ERROR messages
@@ -428,10 +428,9 @@ The script now provides **detailed colored console output** to help with trouble
 
 ### No Data Found
 - Verify you had Uber trips in the specified month/year
-- Check if the month logic is correct (December uses previous year)
-- Ensure your date range covers the intended period
-- Console shows exact date range being queried
-- **Fixed in v2.1**: Timezone issues that caused missing trips have been resolved
+- Check console output for the exact date range being queried
+- Months after the current month will use the previous year
+- **Fixed in v2.2**: December now correctly uses current year when running in December
 
 ### Missing Trips (Especially Early in Month)
 - **This issue has been FIXED in v2.1** with proper UTC timezone handling
